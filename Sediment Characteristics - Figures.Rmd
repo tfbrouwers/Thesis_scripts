@@ -1,0 +1,460 @@
+---
+title: "Sediment Characteristics Figures"
+author: "Tom Brouwers"
+date: "2025-10-21"
+output: html_document
+---
+```{r, echo = FALSE}
+library(tidyverse)
+library(tidyr)
+library(ggrepel)
+setwd("E:/Msc/Thesis/R")
+```
+
+
+```{r, echo = FALSE}
+df_soil2 <- df_soil %>%
+  left_join(df_plot %>% select(library, site), by = "library") %>%
+  distinct(library, .keep_all = TRUE) %>%
+  mutate(waterc_fill = ifelse(is.na(waterc), "NA", "WC   (%)")) %>%
+  mutate(toc_fill = ifelse(is.na(toc), "NA", "TOC  (%)")) %>% # for assigning NA values a grey bar
+  mutate(minc_fill = ifelse(is.na(toc), "NA", "MINC (%)")) # for assigning NA values a grey bar
+
+
+df_soil_sum <- df_soil2 %>%
+  group_by(site) %>%
+  summarise(
+    mean_water = mean(waterc, na.rm = TRUE),
+    sd_water   = sd(waterc, na.rm = TRUE),
+    mean_toc   = mean(toc, na.rm = TRUE),
+    sd_toc     = sd(toc, na.rm = TRUE),
+    mean_minc  = mean(minc, na.rm = TRUE), 
+    sd_minc    = sd(minc, na.rm = TRUE),
+    mean_sand  = mean(sand, na.rm = TRUE), 
+    sd_sand    = sd(sand, na.rm = TRUE),
+    mean_silt  = mean(silt, na.rm = TRUE), 
+    sd_silt    = sd(silt, na.rm = TRUE),
+    mean_clay  = mean(clay, na.rm = TRUE), 
+    sd_clay    = sd(clay, na.rm = TRUE),
+    mean_gravel  = mean(gravel, na.rm = TRUE), 
+    sd_gravel    = sd(gravel, na.rm = TRUE),
+  )
+```
+
+#------------------------------------------ Barplots Waterc, TOC, MINC ------------------------------------
+```{r, echo = FALSE}
+# Water Conent
+bp_waterc <- ggplot(df_soil2, aes(x = library, y = waterc, fill = waterc_fill)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("WC   (%)" = "royalblue2", "NA" = "grey50")) +
+  facet_grid( ~ site, scales = "free_x", space = "free_x") +
+  labs(
+    title = "a",
+    x = "library",
+    y = "Percentage (%)"
+  ) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title   = element_text(size = 22),
+    axis.title.x = element_blank(),
+    strip.text = element_text(size = 24, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 20),
+    legend.position = "none"
+    )
+
+bp_waterc
+
+# Total Organic Carbon
+
+## Add reference data base
+ref_df <- data.frame(
+  type = c("Low floodplain forest", "High floodplain forest", "Permanent cropland"),
+  y = c(4.4, 3.6, 2.56)
+)
+
+df_soil2 <- df_soil2 %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+## plot
+bp_toc <- ggplot(df_soil2, aes(x = library, y = replace_na(toc, 0.5), fill = toc_fill)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("TOC  (%)" = "darkolivegreen4", "NA" = "grey50")) +
+  geom_hline(data = ref_df, aes(yintercept = y, linetype = type, colour = type), size = 1)+
+  scale_colour_manual(
+    values = c("Low floodplain forest" = "red",
+               "High floodplain forest" = "brown4",
+               "Permanent cropland" = "orange")
+  ) +
+  scale_linetype_manual(
+    values = c(
+      "Low floodplain forest" = "dashed",
+      "High floodplain forest" = "dashed",
+      "Permanent cropland" = "dashed"
+    )
+  ) +
+  facet_grid( ~ site, scales = "free_x", space = "free_x") +
+  labs(
+    title = "b",
+    x = "library",
+    y = "Percentage (%)"
+  ) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title   = element_text(size = 22),
+    axis.title.x = element_blank(),
+    strip.text = element_text(size = 24, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 20),
+    legend.position = "none"
+    
+    )
+
+bp_toc
+# ref database
+ref_df2 <- data.frame(
+  type = c("Fluvisol Vistula River"),
+  y = c(0.21))
+# Mineral Inorganic Carbon
+bp_minc <- ggplot(df_soil2, aes(x = library, y = replace_na(minc, 0.02), fill = minc_fill)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("MINC (%)" = "goldenrod2", "NA" = "grey50")) +
+  geom_hline(data = ref_df2, aes(yintercept = y, linetype = type, colour = type), size = 1)+
+  scale_colour_manual(
+    values = c("Fluvisol Vistula River" = "red")
+  ) +
+  scale_linetype_manual(
+    values = c(
+      "Fluvisol Vistula River" = "dashed"
+    )) +
+  facet_grid( ~ site, scales = "free_x", space = "free_x") +
+  labs(
+    title = "c",
+    x = "library",
+    y = "Percentage (%)"
+  ) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title   = element_text(size = 22),
+    axis.title.x = element_blank(),
+    strip.text = element_text(size = 24, face = "bold"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 20),
+    legend.position = "none"
+    
+    )
+
+bp_minc
+
+#----------------- Save Figures ---------------------------
+ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/waterc_CLEAN.jpg", plot = bp_waterc, width = 30, height = 15, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/toc_CLEAN.jpg", plot = bp_toc, width = 30, height = 15, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/minc_CLEAN.jpg", plot = bp_minc, width = 30, height = 15, units = "cm", dpi = 300)
+
+```
+#--------------------------------------------------------- Grain size Figures ------------------------------------------------
+##----------------------------------------------------------Sand, Silt, Clay plot ----------------------------------------------
+```{r, echo = FALSE}
+df_gs <- df_soil2 %>%
+  select(library, gravel, sand, silt, clay, site) %>%
+  mutate(
+    fine_sum = sand + silt + clay, # rescale fine fraction to 100% to fit the trenary plot
+    sand_rel = sand / fine_sum * 100,
+    silt_rel = silt / fine_sum * 100,
+    clay_rel = clay / fine_sum * 100
+  )
+
+df_gs_sum <- df_gs %>%
+  group_by(site) %>%
+  summarise(
+    sand_mean = mean(sand_rel, na.rm = TRUE),
+    sand_sd  = sd(sand_rel, na.rm = TRUE),
+    silt_mean = mean(silt_rel, na.rm = TRUE),
+    silt_sd = sd(silt_rel, na.rm = TRUE),
+    clay_mean = mean(clay_rel, na.rm = TRUE),
+    clay_sd = sd(clay_rel, na.rm = TRUE)
+  )
+
+# grain sizes per site
+df_gs_M <- df_gs %>%
+  filter(site == "M") %>%
+  mutate(label_vjust = case_when(
+    library %in% c("1036", "1038") ~ -1.0, # so these two libraries overlap, we'll manually shift them as fix
+    TRUE ~ 1.5
+  ))
+
+df_gs_W1 <- df_gs %>%
+  filter(site == "W1") %>%
+  mutate(label_vjust = case_when(
+    library %in% c("1047") ~ -1.0, # so these two libraries overlap, we'll manually shift them as fix
+    TRUE ~ 1.5
+  ))
+
+df_gs_W2 <- df_gs %>%
+  filter(site == "W2") %>%
+  mutate(label_vjust = case_when(
+    library == "1039" ~ NA_real_,
+    library == "1043" ~ -1.0, # so these two libraries overlap, we'll manually shift them as fix
+    TRUE ~ 1.5
+  ),
+    label_hjust = case_when(
+      library == "1039" ~ -0.2,
+      TRUE ~ 0.5   # default center
+    )
+  )
+```
+Now make figures
+```{r, echo =FALSE}
+# Ternaries, tr = ternary
+#------------------------------------ M ---------------------------------------
+tr_M <- ggtern(data = df_gs_M, aes(x = sand_rel, y = silt_rel, z = clay_rel)) +
+  geom_point(size = 6) +
+  geom_text(aes(label = library, vjust = label_vjust), size = 7) +
+  theme_bw(base_size = 20) +
+  labs(
+    title = "Fine grain fraction - Moehne",
+    x = "Sand (%)",
+    y = "Silt (%)",
+    z = "Clay (%)"
+  ) +
+  theme_showarrows() +
+  theme(
+    tern.axis.text.T = element_text(size = 22, face = 'bold'),
+    tern.axis.text.L = element_text(size = 22, face = 'bold'),
+    tern.axis.text.R = element_text(size = 22, face = 'bold'),
+    plot.title = element_blank(),
+    tern.axis.arrow.text = element_text(size = 20, face = 'bold'),
+    tern.axis.title = element_text(size = 22, face = 'bold')
+  )
+
+tr_M
+
+#--------------------------------- W1 ----------------------------------------------
+tr_W1 <- ggtern(data = df_gs_W1, aes(x = sand_rel, y = silt_rel, z = clay_rel)) +
+  geom_point(size = 6) +
+  geom_text(aes(label = library, vjust = label_vjust), size = 7) +
+  theme_bw(base_size = 20) +
+  labs(
+    title = "Fine grain fraction - Wester 1",
+    x = "Sand (%)",
+    y = "Silt (%)",
+    z = "Clay (%)"
+  ) +
+  theme_showarrows() +
+  theme(
+    tern.axis.text.T = element_text(size = 22, face = 'bold'),
+    tern.axis.text.L = element_text(size = 22, face = 'bold'),
+    tern.axis.text.R = element_text(size = 22, face = 'bold'),
+    plot.title = element_blank(),
+    tern.axis.arrow.text = element_text(size = 20, face = 'bold'),
+    tern.axis.title = element_text(size = 22, face = 'bold')
+    
+  )
+
+tr_W1
+
+
+#----------------------------------- W2 ---------------------------
+tr_W2 <- ggtern(data = df_gs_W2, aes(x = sand_rel, y = silt_rel, z = clay_rel)) +
+  geom_point(size = 6) +
+  geom_text(aes(label = library,
+                vjust = label_vjust,
+                hjust = label_hjust), 
+            size = 7) +
+  theme_bw(base_size = 20) +
+  labs(
+    title = "Fine grain fraction - Wester 2",
+    x = "Sand (%)",
+    y = "Silt (%)",
+    z = "Clay (%)"
+  ) +
+  theme_showarrows() +
+  theme(
+    tern.axis.text.T = element_text(size = 22, face = 'bold'),
+    tern.axis.text.L = element_text(size = 22, face = 'bold'),
+    tern.axis.text.R = element_text(size = 22, face = 'bold'),
+    plot.title = element_blank(),
+    tern.axis.arrow.text = element_text(size = 20),
+    tern.axis.title = element_text(size = 22, face = 'bold')
+    
+  )
+
+tr_W2
+
+
+# Save plots
+ggtern::ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/tr_M.jpg", plot = tr_M, width = 30, height = 25, units = "cm", dpi = 300)
+ggtern::ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/tr_W1.jpg", plot = tr_W1, width = 30, height = 25, units = "cm", dpi = 300)
+ggtern::ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/tr_W2.jpg", plot = tr_W2, width = 30, height = 25, units = "cm", dpi = 300)
+```
+
+##------------------------------------------- Gravel barplots ----------------------------------------------------------------
+```{r, echo =FALSE}
+bp_gravel_M <- ggplot(data = df_gs_M, aes(x = fct_rev(factor(library)), y = gravel )) +
+  geom_bar(stat = "identity", width =  0.3, fill = "black", color = "black") +
+  coord_flip() +
+  scale_y_continuous(
+    limits = c(0, 80)
+  ) +
+  labs(
+    title = "a",
+    x ="Library",
+    y = "Gravel (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = -0.1),
+    axis.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+bp_gravel_M
+
+#-------------------------------------- W1 ------------------------------------
+bp_gravel_W1 <- ggplot(data = df_gs_W1, aes(x = fct_rev(factor(library)), y = gravel )) +
+  geom_bar(stat = "identity", width =  0.3, fill = "black", color = "black") +
+  coord_flip() +
+  scale_y_continuous(
+    limits = c(0, 80)
+  ) +
+  labs(
+    title = "b",
+    x ="Library",
+    y = "Gravel (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = -0.1),
+    axis.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+bp_gravel_W1
+
+#------------------------------------ W2 ----------------------------------------
+bp_gravel_W2 <- ggplot(data = df_gs_W2, aes(x = fct_rev(factor(library)), y = gravel )) +
+  geom_bar(stat = "identity", width =  0.5, fill = "black", color = "black") +
+  coord_flip() +
+  scale_y_continuous(
+    limits = c(0, 80)
+  ) +
+  labs(
+    title = "b",
+    x ="Library",
+    y = "Gravel (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 18, face = "bold", hjust = -0.1),
+    axis.text = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 14),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank()
+  )
+
+bp_gravel_W2
+
+# save plots
+ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/bp_gravel_M.jpg", plot = bp_gravel_M, width = 20, height = 13.2, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/bp_gravel_W1.jpg", plot = bp_gravel_W1, width = 20, height = 13.2, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Soil Properties/bp_gravel_W2.jpg", plot = bp_gravel_W2, width = 20, height = 13.2, units = "cm", dpi = 300)
+```
+#-------------------------------------------------------- Poster Figure ----------------------------------------------------------------
+```{r, echo=FALSE}
+df_soil_long <- df_soil %>%
+  pivot_longer(
+    cols = c(gravel, sand, silt, clay),
+    names_to  = "fraction",
+    values_to = "percent"
+  )
+# set order
+df_soil_long$fraction <- factor(
+  df_soil_long$fraction,
+  levels = c("clay", "silt", "sand", "gravel")
+)
+
+# Grainsize barplot
+grainsize_plot <- ggplot(df_soil_long, aes(x = library, y = percent, fill = fraction)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Soil grain size fractions per library",
+    x = "Library",
+    y = "Percentage (%)"
+  ) +
+  scale_fill_manual(values = c(
+    "clay"   = "tan4",
+    "silt"   = "tan2",
+    "sand"   = "gold2",
+    "gravel" = "lightyellow3"
+  )) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  )
+
+# Now for other properties
+df_soil_wide <- df_soil %>%
+  select(library, waterc, toc, minc) %>%
+  pivot_longer(
+    cols = c(waterc, toc, minc), 
+    names_to  = "property",
+    values_to = "value"
+  )
+soil_props_plot <- ggplot(df_soil_wide, aes(x = library, y = value, fill = property)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
+  scale_y_continuous(
+    limits = c(0,100)
+  ) +
+  labs(
+    title = "Soil properties per library",
+    x = "Library",
+    y = "Percentage (%)",
+    fill = "Property"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  )
+
+plot(grainsize_plot)
+plot(soil_props_plot)
+
+ggsave("F:/Msc/Thesis/Data/Plots/Soil Properties/grainsize.jpg", plot = grainsize_plot, width = 30, height = 10, units = "cm", dpi = 300)
+ggsave("F:/Msc/Thesis/Data/Plots/Soil Properties/soilprops.jpg", plot = soil_props_plot, width = 30, height = 10, units = "cm", dpi = 300)
+```
+
+# final figure
+```{r, echo = FALSE}
+df_soil2 <- df_soil2 %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M")) %>%
+  mutate(library = fct_relevel(library, "1040", "1041", "1042", "1043", "1039"))
+
+p_toc <- ggplot(df_soil2, aes(x = library, y = replace_na(toc, 0.5), fill = toc_fill)) +
+  geom_bar(stat = "identity", width = 0.7) +
+  scale_fill_manual(values = c("TOC  (%)" = "darkolivegreen4", "NA" = "grey50")) +
+  facet_grid( ~ site, scales = "free_x") +
+  labs(
+    title = "Organic carbon fraction (TOC %)",
+    x = "library",
+    y = "Percentage (%)"
+  ) +
+  my_theme +
+  theme(
+    legend.position = "none"
+  )
+
+p_toc
+ggsave("E:/Msc/Thesis/Data/Plots/Final figure/p_toc_clean.jpg", p_toc, width = 30, height = 20, units = "cm", dpi = 300)
+```
+

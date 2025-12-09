@@ -1,0 +1,226 @@
+---
+title: "Heatmap - Relative Abundance"
+author: "Tom Brouwers"
+date: "2025-10-01"
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(patchwork)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(writexl)
+library(tidyverse)
+library(scales)
+library(tidyr)
+library(tidytext)
+library(stingr)
+
+getwd()
+setwd("E:/Msc/Thesis/R")
+```
+# Load data
+```{r, echo=FALSE}
+# calculate relative contribution of each plant genera to total unique genus reads
+df_rel_libs <- df_plants %>%
+  group_by(library) %>%
+  mutate(rel_abundance = sum_genus_count / sum(sum_genus_count, na.rm = TRUE)) %>%
+  mutate(total_sum_genus_count = sum(genus_count_assembly, na.rm = TRUE)) %>%
+  ungroup()
+
+# Get all genera contributing > 1% of the signal per library, define the rest as 'other' 
+df_rel_1prcnt <- df_rel_libs %>%
+  group_by(library) %>%
+  mutate(genus_name = if_else(rel_abundance >= 0.01, genus_name, "Other")) %>%
+  group_by(library, genus_name) %>%
+  summarise(rel_abundance = sum(rel_abundance, na.rm = TRUE), .groups = "drop")
+```
+
+# Now we need to add 0.00 to all library and genus combinations which have no entries, otherwise the heatmap will look clunky. These will be assigned <1% in legend
+```{r, echo=FALSE}
+# get all libs and all genera
+all_libs   <- unique(df_rel_1prcnt$library)
+all_genera <- unique(df_rel_1prcnt$genus_name)
+
+# get all combinations
+all_combos <- expand_grid(
+  library = all_libs,
+  genus_name = all_genera
+)
+
+# combine with df and set rel_abundance to 0.00
+df_rel_1prcnt_full <- all_combos %>%
+  left_join(df_rel_1prcnt, by = c("library", "genus_name")) %>% 
+  mutate(rel_abundance = coalesce(rel_abundance, 0.001)) %>%
+  mutate(site = case_when( # here we add location for each library
+    str_detect(library, "Lib.J.1036")  ~ "M"  ,
+    str_detect(library, "Lib.J.1037")  ~ "M"  ,
+    str_detect(library, "Lib.J.1038")  ~ "M"  ,
+    str_detect(library, "Lib.J.1039")  ~ "W2" ,
+    str_detect(library, "Lib.J.1040")  ~ "W2" ,
+    str_detect(library, "Lib.J.1041")  ~ "W2" ,
+    str_detect(library, "Lib.J.1042")  ~ "W2" ,
+    str_detect(library, "Lib.J.1043")  ~ "W2" ,
+    str_detect(library, "Lib.J.1044")  ~ "W1" ,
+    str_detect(library, "Lib.J.1045")  ~ "W1" ,
+    str_detect(library, "Lib.J.1046")  ~ "W1" ,
+    str_detect(library, "Lib.J.1047")  ~ "W1"  
+  )) %>%
+  left_join(growth_form, growth_form, by = "genus_name") #%>%
+  #mutate(rel_abundance = rel_abundance*100)
+
+# also take site assing list from this df
+site_assign_list <- df_rel_1prcnt_full %>%
+  select(library, site) %>%
+  distinct(library, site, .keep_all = FALSE)
+
+breaks_rel <- c(0, 0.009, 0.03, 0.05, 0.10, 0.15, 0.25, 0.35, 0.50, 0.60, 0.75, 1.00)
+labels_rel <- c("<1", "1-3", "3-5", "5-10", "10-15", "15-25", "25-35", "35-50", "50-60", "60-75", "75-100")
+
+df_rel_1prcnt_full <- df_rel_1prcnt_full %>%
+  mutate(rel_abund_bin = cut(
+    rel_abundance,
+    breaks = breaks_rel,
+    labels = labels_rel,
+    include.lowest = TRUE,
+    right = FALSE
+  ))
+
+df_sum <- df_rel_1prcnt_full %>%
+  group_by(library, growth_form) %>%
+  summarise(total_rel_abundance = sum(rel_abundance, na.rm = TRUE))
+```
+
+
+# Define order of groups for plotting
+```{r, echo=FALSE}
+# site order already made in agriculture heatmap
+site_list <- c(
+  "M",
+  "W1",
+  "W2"
+)
+
+# growth_from order
+growth_form_order <- c(
+  "Tree",
+  "Herb",
+  "Grass",
+  "Shrub",
+  ""
+)
+
+# add orders to df
+df_rel_1prcnt_full <- df_rel_1prcnt_full %>%
+  mutate(growth_form = factor(growth_form, levels = growth_form_order)) %>%
+  select(!site) %>%
+  mutate(library = str_remove(library, "^Lib.J.")) %>%
+  left_join(site_assign_list2, by = "library") %>%
+  mutate(site = factor(site, levels = site_list))
+
+df_rel_1prcnt_full <- df_rel_1prcnt_full %>%
+  mutate(growth_form = ifelse(is.na(as.character(growth_form)), "", as.character(growth_form))) %>%
+  mutate(growth_form = factor(growth_form, levels = growth_form_order))
+
+view(df_rel_1prcnt_full)
+```
+
+# colours for gradient
+```{r, echo=FALSE}
+heatmap_colours_rel <-  c(
+  "grey90"  ,  # white
+  "#377eb8",  # green
+  "#FFFF00",  # yellow
+  "#FFA500",  # orange
+  "#FF0000",  # red
+  "#800080"   # purple
+)
+
+bin_colours_rel <- colorRampPalette(heatmap_colours_rel)(length(labels_rel))
+names(bin_colours_rel) <- labels_rel
+```
+
+# Now making the Heatmap
+```{r, echo=FALSE}
+df_rel_1prcnt_full <- df_rel_1prcnt_full %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+
+heatmap_rel <- ggplot(df_rel_1prcnt_full, aes(x = library, y = genus_name, fill = rel_abund_bin)) +
+  geom_tile(colour = "grey") +
+  facet_grid(growth_form ~ site, scales = "free", space = "free") +
+  scale_fill_manual(
+    values = bin_colours_rel,
+    name = "% unique genus reads"
+  ) +
+  labs(
+    x    = "",
+    y    = ""  
+  ) +
+  guides(fill = guide_legend(reverse = TRUE)) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text.y    = element_text(size = 16, hjust = 0.01, face = "italic"),
+    axis.text.x = element_text(size = 18, angle = 45, hjust = 1, face = "bold"),
+    axis.title   = element_text(size = 22),
+    axis.title.x = element_blank(),
+    strip.text.x = element_text(size = 24, face = "bold"),
+    strip.text.y = element_text(size = 18),
+    legend.title = element_text(size = 20),
+    legend.text = element_text(size = 20)
+    )
+
+
+heatmap_rel
+
+ggsave("E:/Msc/Thesis/Data/Plots/Heatmaps/Relative_map1.jpg", plot = heatmap_rel, width = 35, height = 22, units = "cm" ,dpi = 300)
+
+```
+# final figure
+```{r, echo = FALSE}
+# Parameters
+
+fluv_colour <- c(
+  "Salix"      = "cyan3",
+  "Populus"    = "green3",
+  "Alnus"      = "royalblue4",
+  "Petasites"  = "#e14c4c",
+  "Ranunculus" = "pink3"
+)
+
+fluv_order <- c("Petasites", "Ranunculus", "Salix", "Alnus")
+
+# Prepare data
+df_rel_final <- df_rel_1prcnt_full %>%
+  mutate(library = str_remove(library, "Lib.J.")) %>%
+  filter(genus_name %in% fluv_order) %>%
+  group_by(library, site) %>%
+  mutate(rel_abundance_rescaled = rel_abundance / sum(rel_abundance)) %>%
+  ungroup() %>%
+  mutate(genus_name = factor(genus_name, levels = fluv_order)) %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+
+
+# Plot
+p_fluv <- ggplot(df_rel_final, aes(x = library, y = rel_abundance_rescaled, fill = genus_name)) +
+  geom_col(position = "stack", width = 0.75) +
+  facet_grid(. ~ site, scales = "free_x") +
+  scale_y_continuous(
+    limits = c(0, 1)
+  ) +
+  scale_fill_manual(values = fluv_colour) +
+  labs(
+    y = "Relative abundance",
+    title = "Taxa indicating varying fluvial conditions") +
+  my_theme +
+  theme(legend.position = "none",
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank()) 
+
+p_fluv
+
+ggsave("E:/Msc/Thesis/Data/Plots/Final figure/p_fluv_clean.jpg", p_fluv, width = 30, height = 5, units = "cm", dpi = 300)
+```
+
+
+

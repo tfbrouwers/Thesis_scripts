@@ -1,0 +1,513 @@
+---
+title: "Multiple Linear Regression Analysis"
+author: "Tom Brouwers"
+date: "2025-06-17"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(broom)
+library(tidyr)
+library(purrr)
+library(dplyr)
+library(reshape2)
+
+getwd()
+setwd("E:/Msc/Thesis/R")
+```
+
+## Create multiple linear regression model for Soil Characteristics vs Deamination Rate (5p_frac + 3p_frac / 2)
+
+### first we create df's 
+```{r, echo=FALSE}
+# First we load in the data frames
+df_soil <- read.csv("E:/Msc/Thesis/Data/Soil Characteristics/soil characteristics vector.csv", header = TRUE)
+# adjust column names
+df_soil <- df_soil %>%
+  rename(
+    library = Library,
+    waterc  = Water.content....,
+    toc     = TOC....,
+    minc    = MINC....,
+    gravel  = Gravel....,
+    sand    = Sand....,
+    silt    = Silt....,
+    clay    = Clay....
+    )
+  
+df_soil <- df_soil %>%
+  filter(!library == "Lib.J.1044") %>%
+  mutate(library = str_remove(library, "Lib.J."))
+
+# ------------------------------------- Create df's with deam_rate per universal genera per site ---------------------------------------------------
+df_deam_uni_M <- df_gen_uni_M %>%
+  select("library", "genus_name", "deamination_rate")
+
+df_deam_uni_W1 <- df_gen_uni_W1 %>%
+  select("library", "genus_name", "deamination_rate")
+
+df_deam_uni_W2 <- df_gen_uni_W2 %>%
+  select("library", "genus_name", "deamination_rate")
+
+# ---------------------------------------- Now we combine them with df_soil --------------------------------------------
+df_lr_M <- df_deam_uni_M %>%
+  left_join(df_soil, by = "library")
+
+df_lr_W1 <- df_deam_uni_W1 %>%
+  left_join(df_soil, by = "library")
+
+df_lr_W2 <- df_deam_uni_W2 %>%
+  left_join(df_soil, by = "library")
+```
+
+# Now we run linear regression models per site per universal genera.
+```{r, echo = FALSE}
+predictors <- c("waterc", "gravel", "sand", "silt", "clay")
+predictors_W2 <- c("waterc", "gravel", "sand", "silt", "clay", "toc", "minc")
+#  ----------------------- M models --------------------------------------
+results_M <- df_lr_M %>%
+  group_by(genus_name) %>%
+  summarise(
+    models = map(predictors, ~ lm(as.formula(paste("deamination_rate ~", .x)), data = cur_data())),
+    predictors = predictors
+  ) %>%
+  mutate(
+    tidied = map(models, tidy),
+    glanced = map(models, glance)
+  ) %>%
+  select(-models) %>%
+  unnest(cols = c(tidied, glanced), names_sep = "_") %>%
+  select(
+         genus_name,
+         predictors,
+         term = tidied_term,
+         estimate = tidied_estimate,
+         std.error = tidied_std.error,
+         statistic = tidied_statistic,
+         p.value = tidied_p.value,
+         r.squared = glanced_r.squared,
+         adj.r.squared = glanced_adj.r.squared
+         ) %>%
+  filter(term != "(Intercept)")
+
+# Pivot wider to get p.values as cell values with predictors as rows and genus_names as columns
+p_wide_M <- results_M %>%
+  select(genus_name, predictors, p.value) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = p.value
+  )
+
+r_wide_M <- results_M %>%
+  select(genus_name, predictors, r.squared) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = r.squared 
+  )
+
+# --------------------------------------------------------- W1 models -----------------------------------------------------------------------
+results_W1 <- df_lr_W1 %>%
+  group_by(genus_name) %>%
+  summarise(
+    models = map(predictors, ~ lm(as.formula(paste("deamination_rate ~", .x)), data = cur_data())),
+    predictors = predictors
+  ) %>%
+  mutate(
+    tidied = map(models, tidy),
+    glanced = map(models, glance)
+  ) %>%
+  select(-models) %>%
+  unnest(cols = c(tidied, glanced), names_sep = "_") %>%
+  select(
+         genus_name,
+         predictors,
+         term = tidied_term,
+         estimate = tidied_estimate,
+         std.error = tidied_std.error,
+         statistic = tidied_statistic,
+         p.value = tidied_p.value,
+         r.squared = glanced_r.squared,
+         adj.r.squared = glanced_adj.r.squared
+         ) %>%
+  filter(term != "(Intercept)")
+
+# Pivot wider to get p.values as cell values with predictors as rows and genus_names as columns
+p_wide_W1 <- results_W1 %>%
+  select(genus_name, predictors, p.value) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = p.value
+  )
+
+r_wide_W1 <- results_W1 %>%
+  select(genus_name, predictors, r.squared) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = r.squared 
+  )
+
+# ------------------------------------------------------- W2 models -----------------------------------------------------------------
+results_W2 <- df_lr_W2 %>%
+  group_by(genus_name) %>%
+  summarise(
+    models = map(predictors_W2, ~ lm(as.formula(paste("deamination_rate ~", .x)), data = cur_data())),
+    predictors = predictors_W2
+  ) %>%
+  mutate(
+    tidied = map(models, tidy),
+    glanced = map(models, glance)
+  ) %>%
+  select(-models) %>%
+  unnest(cols = c(tidied, glanced), names_sep = "_") %>%
+  select(
+         genus_name,
+         predictors,
+         term = tidied_term,
+         estimate = tidied_estimate,
+         std.error = tidied_std.error,
+         statistic = tidied_statistic,
+         p.value = tidied_p.value,
+         r.squared = glanced_r.squared,
+         adj.r.squared = glanced_adj.r.squared
+         ) %>%
+  filter(term != "(Intercept)")
+
+p_wide_W2 <- results_W2 %>%
+  select(genus_name, p.value, predictors) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = p.value
+  )
+
+r_wide_W2 <- results_W2 %>%
+  select(genus_name, r.squared, predictors) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = r.squared
+  )
+```
+
+# ---------------------- Now we make the correlation matrices (Heatmaps) -------------- 
+##------------------------------------------ M  ---------------------------------------------------
+###-------------------------------------------- p values ---------------------------------------------
+
+```{r, echo=FALSE}
+predictor_labels <- c( # for having nice titles in the plot, without changing column names
+  waterc = "WC (%)",
+  gravel = "Gravel (%)",
+  sand   = "Sand (%)",
+  silt   = "Silt (%)",
+  clay   = "Clay (%)",
+  toc    = "TOC (%)",
+  minc   = "MINC (%)"
+)
+
+predictor_order <- c(
+  'waterc',
+  'gravel',
+  'sand',
+  'silt',
+  'clay'
+)
+
+
+#--------------------------------------------------
+p_long_M <- p_wide_M %>% # pivot long again for ggplot2
+  pivot_longer(
+    cols = -predictors,
+    names_to = "genus",
+    values_to = "p.value") %>%
+  mutate(predictors = factor(predictors, levels = predictor_order))
+# cm = correlation matrix, M is site letter, p means p.value. So correlation matrix of site M for P.values
+cm_M_p <- ggplot(p_long_M, aes(x = predictors, y = genus, fill = p.value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(
+    colors = c("#08306B", "#DEEBF7", "#FEE0D2", "#A50F15"),
+    values = scales::rescale(c(0, 0.025, 0.05, 1)),
+    limits = c(0, 1),
+    name = "p-value"
+  ) +
+  scale_x_discrete(labels = predictor_labels) +
+  coord_fixed() +
+  geom_text(aes(label = sprintf("%.2f", p.value)), size = 8) +
+  labs(
+    title = "Significance (p-values) Moehne",
+    caption = "Blue < 0.05 | Red > 0.05"
+  ) +
+  theme(
+    plot.title   = element_text(size = 24, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 20),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    legend.text  = element_text(size = 20),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 24),
+    plot.caption =  element_text(size = 16, face = "bold", vjust = -0.2)
+    
+  )
+
+cm_M_p
+
+ggsave("E:/Msc/Thesis/Data/Plots/Sediment Correlation Matrices/cm_M_p.jpg", plot = cm_M_p, width = 30, height = 25, units = "cm", dpi = 300)
+```
+### -------------------------------------------------- r squared M ----------------------------------
+```{r, echo=FALSE}
+r_long_M <- r_wide_M %>% # pivot long again for ggplot2
+  pivot_longer(
+    cols = -predictors,
+    names_to = "genus",
+    values_to = "r.square") %>%
+  mutate(predictors = factor(predictors, levels = predictor_order))
+
+cm_M_r <- ggplot(r_long_M, aes(x = predictors, y = genus, fill = r.square)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(
+    colours = c("white", "#DEEBF7", "blue3"),
+    values = scales::rescale(c(0, 0.3, 1)),
+    limit = c(0,1),
+    name = expression(R^2)
+  ) +
+  scale_x_discrete(labels = predictor_labels) +
+  coord_fixed() +
+  geom_text(aes(label = sprintf("%.2f", r.square)), size = 7) +
+  labs(
+    title = "Correlation Strength (R²) Moehne"
+  ) +
+  theme(
+    plot.title   = element_text(size = 22, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 20),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    legend.text  = element_text(size = 22),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 22),
+    plot.subtitle = element_text(size = 18)
+    
+  )
+
+cm_M_r
+
+ggsave("E:/Msc/Thesis/Data/Plots/Sediment Correlation Matrices/cm_M_r.jpg", plot = cm_M_r, width = 30, height = 25, units = "cm", dpi = 300)
+
+```
+
+##------------------------------------------------------- W1 ------------------------------------------------
+###--------------------------------------------------- p values -------------------------------------------------------------
+```{r, echo=FALSE}
+p_long_W1 <- p_wide_W1 %>% # pivot long again for ggplot2
+  pivot_longer(
+    cols = -predictors,
+    names_to = "genus",
+    values_to = "p.value") %>%
+  mutate(predictors = factor(predictors, levels = predictor_order))
+# cm = correlation matrix, M is site letter, p means p.value. So correlation matrix of site M for P.values
+cm_W1_p <- ggplot(p_long_W1, aes(x = predictors, y = genus, fill = p.value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(
+    colors = c("#08306B", "#DEEBF7", "#FEE0D2", "#A50F15"),
+    values = scales::rescale(c(0, 0.025, 0.05, 1)),
+    limits = c(0, 1),
+    name = "p-value"
+  ) +
+  scale_x_discrete(labels = predictor_labels) +
+  coord_fixed() +
+  geom_text(aes(label = sprintf("%.2f", p.value)), size = 8) +
+  labs(
+    title = "Significance (p-values) Wester 1",
+    caption = "Blue < 0.05 | Red > 0.05"
+  ) +
+  theme(
+    plot.title   = element_text(size = 24, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 20),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    legend.text  = element_text(size = 20),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 24),
+    plot.caption =  element_text(size = 16, face = "bold", vjust = -0.2)
+    
+  )
+
+cm_W1_p
+
+ggsave("E:/Msc/Thesis/Data/Plots/Sediment Correlation Matrices/cm_W1_p.jpg", plot = cm_W1_p, width = 30, height = 25, units = "cm", dpi = 300)
+```
+###---------------------------------------------------------------- r squared ---------------------------------------
+```{r, echo=FALSE}
+r_long_W1 <- r_wide_W1 %>% # pivot long again for ggplot2
+  pivot_longer(
+    cols = -predictors,
+    names_to = "genus",
+    values_to = "r.square") %>%
+  mutate(predictors = factor(predictors, levels = predictor_order))
+
+cm_W1_r <- ggplot(r_long_W1, aes(x = predictors, y = genus, fill = r.square)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(
+    colours = c("white", "#DEEBF7", "blue3"),
+    values = scales::rescale(c(0, 0.3, 1)),
+    limit = c(0,1),
+    name = expression(R^2)
+  ) +
+  scale_x_discrete(labels = predictor_labels) +
+  coord_fixed() +
+  geom_text(aes(label = sprintf("%.2f", r.square)), size = 7) +
+  labs(
+    title = "Correlation Strength (R²) Wester 1"
+  ) +
+  theme(
+    plot.title   = element_text(size = 22, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 20),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    legend.text  = element_text(size = 22),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 22),
+    plot.subtitle = element_text(size = 18)
+    
+  )
+
+cm_W1_r
+
+ggsave("E:/Msc/Thesis/Data/Plots/Sediment Correlation Matrices/cm_W1_r.jpg", plot = cm_W1_r, width = 30, height = 25, units = "cm", dpi = 300)
+
+```
+
+##---------------------------------------------------------------------- W2 ----------------------------------------------------------------
+###------------------------------------------------------------------ p values W2 -----------------------------------------------------------
+```{r, echo=FALSE}
+predictor_orderW2 <- c(
+  'waterc',
+  'gravel',
+  'sand',
+  'silt',
+  'clay',
+  'toc',
+  'minc'
+)
+
+p_long_W2 <- p_wide_W2 %>% # pivot long again for ggplot2
+  pivot_longer(
+    cols = -predictors,
+    names_to = "genus",
+    values_to = "p.value")%>%
+  mutate(predictors = factor(predictors, levels = predictor_orderW2))
+# cm = correlation matrix, M is site letter, p means p.value. So correlation matrix of site M for P.values
+cm_W2_p <- ggplot(p_long_W2, aes(x = predictors, y = genus, fill = p.value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(
+    colors = c("#08306B", "#DEEBF7", "#FEE0D2", "#A50F15"),
+    values = scales::rescale(c(0, 0.025, 0.05, 1)),
+    limits = c(0, 1),
+    name = "p-value"
+  ) +
+  scale_x_discrete(labels = predictor_labels) +
+  coord_fixed() +
+  geom_text(aes(label = sprintf("%.2f", p.value)), size = 8) +
+  labs(
+    title = "Significance (p-values) Wester 2",
+    caption = "Blue < 0.05 | Red > 0.05"
+  ) +
+  theme(
+    plot.title   = element_text(size = 24, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 20),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    legend.text  = element_text(size = 20),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 24),
+    plot.caption =  element_text(size = 16, face = "bold", vjust = -0.2)
+    
+  )
+
+cm_W2_p
+
+ggsave("E:/Msc/Thesis/Data/Plots/Sediment Correlation Matrices/cm_W2_p.jpg", plot = cm_W2_p, width = 30, height = 25, units = "cm", dpi = 300)
+```
+
+###------------------------------------------------------------------ r2 W2 ------------------------------------------------------------
+```{r, echo=FALSE}
+r_long_W2 <- r_wide_W2 %>% # pivot long again for ggplot2
+  pivot_longer(
+    cols = -predictors,
+    names_to = "genus",
+    values_to = "r.square") %>%
+  mutate(predictors = factor(predictors, levels = predictor_orderW2))
+
+cm_W2_r <- ggplot(r_long_W2, aes(x = predictors, y = genus, fill = r.square)) +
+  geom_tile(color = "white") +
+  scale_fill_gradientn(
+    colours = c("white", "#DEEBF7", "blue3"),
+    values = scales::rescale(c(0, 0.3, 1)),
+    limit = c(0,1),
+    name = expression(R^2)
+  ) +
+  scale_x_discrete(labels = predictor_labels) +
+  coord_fixed() +
+  geom_text(aes(label = sprintf("%.2f", r.square)), size = 7) +
+  labs(
+    title = "Correlation Strength (R²) Wester 2"
+  ) +
+  theme(
+    plot.title   = element_text(size = 22, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 20),
+    axis.title.y = element_blank(),
+    axis.title.x = element_blank(),
+    legend.text  = element_text(size = 22),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 22),
+    plot.subtitle = element_text(size = 18)
+    
+  )
+
+cm_W2_r
+
+ggsave("E:/Msc/Thesis/Data/Plots/Sediment Correlation Matrices/cm_W2_r.jpg", plot = cm_W2_r, width = 30, height = 25, units = "cm", dpi = 300)
+
+```
+
+
+# ------------------ Average deamrate per library --------------------------
+
+Apparently having this few sampling locations gives problems with mlr, so we just use linear regression per soil characteristic. This allows us to use full data set for some characteristics. So water content and grainsizes can all be done. Only waiting on toc and minc for M1L1 and W1 samples.  
+
+
+```{r model, echo=FALSE}
+#---------------------------------------------- Selecting average deam rate per library --------------------------------
+df_deam <- df_genera_uni %>%
+  mutate(average_deam_rate = mean(deamination_rate, na.rm = TRUE)) %>%
+  select(1, 2, "average_deam_rate") %>% # Here we create the average deamination rate per library, later we can check for each universal genera
+  slice_max(average_deam_rate, n = 1, with_ties = FALSE)
+
+# Now we combine the data frames
+df_mlr <- df_deam %>%
+  left_join(df_soil, by = "library")
+
+# Currently only have W2 samples complete, so we'll use that as subset but later replace with full set
+df_mlr_sub <- df_mlr %>%
+  filter(library %in% c("Lib.J.1040", "Lib.J.1041", "Lib.J.1042", "Lib.J.1043"))
+# ----------------------------------------------- Model Building ------------------------------------------------
+# Model for water content
+model_wc <- lm(average_deam_rate ~ waterc, data = df_mlr)
+summary(model_wc)
+
+# gravel model
+model_gr <- lm(average_deam_rate ~ gravel, data = df_mlr)
+summary(model_gr)
+
+# Sand model
+model_sa <- lm(average_deam_rate ~ sand, data = df_mlr)
+summary(model_sa)
+
+# silt model
+model_si <- lm(average_deam_rate ~ silt, data = df_mlr)
+summary(model_si)
+
+# clay model
+model_cl <- lm(average_deam_rate ~ clay, data = df_mlr)
+summary(model_cl)
+
+
+```

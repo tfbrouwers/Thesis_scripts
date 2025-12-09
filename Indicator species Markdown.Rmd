@@ -1,0 +1,342 @@
+---
+title: "Indicator species"
+author: "Tom Brouwers"
+date: "2025-05-26"
+output: pdf_document
+---
+# This file is for filtering indicator species in our df. In the final code block you find the real code I used, the first ones are trial and error which have been updated and subsequently broken overtime. The last one is an integrated section which works.
+```{r, echo = FALSE, include= FALSE}
+#first load libraries
+library(tidyverse)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(ggrepel)
+library(openxlsx)
+```
+
+# Here we first create our df by reducing raw data to only parts we are interested in. 
+```{r, echo = FALSE}
+#set wd and load data
+getwd()
+setwd("E:/Msc/Thesis/R")
+df_2504 <- read_tsv("E:/Msc/Thesis/Data/Sequencing/beaver_250424_raw_taxonomy_data.tsv")
+#this is for assigning whether genera is native, introduced or absent in our location
+genera_status <- read.csv('E:/Msc/Thesis/Data/Sequencing/genera status list2.csv', header = TRUE, sep = ',')
+# Make new, leaner df 
+df_indicator <- df_2504 %>%
+  filter( # exclude irrelevant libraries, bacteria, animals etc.
+    !library %in% c("Lib.J.1035", "Lib.J.1048", 'Lib.J.1049')) %>% 
+  filter(!phylum_name %in% c(
+    "Chordata",
+    "Annelida",
+    "Arthropoda",
+    "Mollusca",
+    "Nematoda",
+    "Acidobacteriota" ,
+    "Actinomycetota"  , 
+    "Pseudomonadota"  ,
+    "Bacteroidota"    ,
+    "Chloroflexota"   ,
+    "Bacillota"       ,
+    "Planctomycetota" ,
+    "Chlamydiota"     ,
+    "Myxococcota"     ,
+    "Thermodesulfobacteriota",
+    "Mycoplasmatota"  ,
+    "Verrucomicrobiota",
+    "Candidatus Methylomirabilota",
+    "Gemmatimonadota" ,
+    "Nitrospirota"    ,
+    "Campylobacterota"))  %>% 
+  select( # Next we select the relevant columns
+    .,
+    1,
+    2,
+    4,
+    7:12,
+    15,
+    17,
+    18,
+    "sum_genus_count",
+    "family_count_assembly",
+    "deam5p_frac_genus",
+    "deam3p_frac_genus",
+    "median_read_length_genus",
+    "ancientness_genus"
+  ) %>%
+  mutate(deamination_rate = (deam5p_frac_genus + deam3p_frac_genus) / 2)  %>% #add deamination rate
+  mutate(location = case_when( # This section is so that we can run per location
+    str_detect(external_id.x, "^M")  ~ "Moehne"  ,
+    str_detect(external_id.x, "^W1") ~ "Wester 1",
+    str_detect(external_id.x, "^W2") ~ "Wester 2"
+  )) %>%
+  group_by(library, genus_name) %>%
+  filter(!genus_count_assembly < 10) %>% # this is to exclude low read entries
+  left_join(genera_status, by = 'genus_name') %>% # add indicator list
+  ungroup() %>%
+  group_by(library)
+
+max_genus_reads <- df_indicator %>%
+  group_by(genus_name) %>%
+  summarise(max_genus_count = max(genus_count_assembly, na.rm = TRUE))
+
+df_max_fraxinus <- df_indicator %>%
+  group_by(library) %>%
+  summarise(genus_count_assembly = max(genus_count_assembly, na.rm = TRUE))
+print(df_max_fraxinus)
+```
+# Species of interest
+Now we have our df, we must start checking with Ben's list.
+First we add the species which are present in our DB. If species is not present in library we not 'not present'. If present but genus_count_assembly < 100 reads we not 'insufficient reads'. If > 100 reads in genus_count_assembly we note the amount of reads. 
+
+```{r, echo=FALSE}
+# load file
+indicator_list <- read.xlsx("E:/Msc/Thesis/Data/indicator species.xlsx", sheet = 3, colNames = TRUE, rowNames = FALSE, skipEmptyCols = TRUE) %>%
+  mutate(Indicator_species = str_trim(str_to_lower(Indicator_species))) 
+
+
+df_indicator <- df_indicator %>%
+  mutate(taxa_name = str_trim(str_to_lower(taxa_name))) %>%
+  mutate(genus_name = str_trim(str_to_lower(genus_name)))
+
+# 1 extract taxa we do have from xlsx file
+species_of_interest <- indicator_list %>%
+  filter(Species_in_DB == "Yes") %>%
+  mutate(
+    Indicator_species = str_trim(as.character(Indicator_species)),
+    taxa_name = Indicator_species,
+    genus_name = word(Indicator_species, 1)
+    ) %>%
+  select(taxa_name, genus_name, Indicator_species)
+
+# 2: join with df_indicator to get presence and read counts
+joined_species <- df_indicator %>%
+  filter(taxa_name %in% taxa_of_interest$taxa_name) %>%
+  mutate(read_status = case_when(
+    genus_count_assembly >= 100 ~ as.character(genus_count_assembly),
+    genus_count_assembly < 100  ~ "insufficient reads",
+    TRUE                        ~ "not present"
+  )) %>%
+  select(taxa_name, library, read_status)
+
+# 3 pivot table and add one column per library
+wide_taxa_table <- joined_species %>%
+  pivot_wider(
+    names_from = library,
+    values_from = read_status
+  )
+
+# 4: left join back into taxa_of_interest to complete table
+final_species_table <- species_of_interest %>%
+  left_join(wide_taxa_table, by = "taxa_name") %>%
+  mutate(across(starts_with("Lib.J"), ~replace_na(.x, "absent"))) %>%
+  select(-taxa_name, -genus_name) %>%
+  mutate(Indicator_species = str_trim(str_to_lower(Indicator_species)))
+
+# 5: right join table to indicator_list and save as xlsx
+joined_indicator_list <- indicator_list %>%
+  left_join(final_species_table, by = "Indicator_species")
+
+# 6 save final table
+write.xlsx(joined_indicator_list, "indicator_list_with_species_reads.xlsx")
+
+head(joined_indicator_list)
+```
+
+# Absent Genera
+I also want to make a df to check which genera are present and which are absent in the df (f.e. Allium is absent in our df). 
+```{r, echo=FALSE}
+indicator_status_list <- indicator_list %>%
+  filter(Genus_in_DB == "Yes") %>%
+  mutate(
+    genus_name = word(Indicator_species, 1),
+    status = 'present'
+  ) %>%
+  select(Indicator_species, Species_in_DB, Genus_in_DB, genus_name,  status) %>%
+  mutate(status = case_when(
+    genus_name %in% df_indicator$genus_name ~ "present",
+    TRUE ~ "absent"
+    )) 
+
+present_list <- indicator_status_list %>%
+  filter(status == "present") %>%
+  select(Indicator_species, genus_name, Species_in_DB, Genus_in_DB, status) %>%
+  mutate(Species_in_DB = factor(Species_in_DB, levels = c(
+    "Yes",
+    "No",
+    "Viola odorata, Viola pubescens var. scabriuscula",
+    "Crataegus laevigata",
+    "Cotoneaster glaucophyllus",
+    "Cornus florida, C. kousa, C. controversa, C. suecica",
+    "19 sp.",
+    "53 sp."
+    ))) %>%
+  arrange(Species_in_DB)
+
+write.xlsx(present_list, "indicator_present_list.xlsx")
+
+# Now I want to update my excel file based on this
+indicator_absent_genera <- joined_indicator_list %>%
+  left_join(indicator_status_list %>%
+              select(Indicator_species, status)
+            , by = 'Indicator_species') 
+indicator_absent_genera <- indicator_absent_genera %>%
+  mutate(across(starts_with("Lib.J."),
+                ~ if_else(Genus_in_DB == "Yes" & status == 'absent',"absent", .x ))) %>%
+  mutate(across(starts_with("Lib.J."),
+                ~ if_else(Species_in_DB == "No" & status == "present",
+                          paste("max read in genus -", max_genus_count), 
+                          .x
+                          )))
+# write to excel
+write.xlsx(indicator_absent_genera, 'species_of_interest_and_absent_genera.xlsx')
+
+head(indicator_absent_genera)
+```
+# Present Genera, missing species
+So now I we have added all species which are present in reference DB and data (and also updated status of those absent in data), we also updated status of Genera which are in reference DB but not in the data. Now we only need to look into genera which are present in reference DB and present in data but we don't have the specific species in reference DB. So we need to make a list with all species in that genus, and later figure out which one we ought to use. 
+## Genera of interest
+We do the same cirteria as for species but now on genus level. Because of this we can't join to the original table because these will be different species. So we make a seperate table with all species from that genus for now. When we figure out which species in our df is closest to the reference and can act as a substitute we will add them to the list. But first just a list of all species of the genera we are interested in, removing the ones we already added to the table before. So only those for which we have the genus in DB but not specific species.  
+```{r, echo=FALSE}
+# 1 We want a list of only genera that are present and for which we have no reference species genome in DB
+genera_of_interest <- indicator_status_list %>%
+  filter(Species_in_DB == "No" & Genus_in_DB == "Yes" & status == "present")
+
+
+# 2 Now pull these genera from df, keep taxa level 
+df_filtered <- df_indicator %>%
+  filter(genus_name %in% genera_of_interest$genus_name)
+
+# 3 sort for combinations of taxa and libraries
+genera_library_combos <-  df_filtered %>%
+  distinct(genus_name, taxa_name, library)
+
+# 4 add genus reads and classify based on this
+result_table <- genera_library_combos %>%
+  left_join(df_indicator %>% select(genus_name, taxa_name, library, genus_count_assembly),
+            by = c("genus_name", "taxa_name", "library")) %>%
+  mutate(result = case_when(
+    is.na(genus_count_assembly) ~ "not present",
+    genus_count_assembly < 100 ~ "insufficient reads",
+    TRUE ~ as.character(genus_count_assembly)
+  ))
+
+# 5 create wide table iwth column per library and replace NA with not present
+final_genera_table <- result_table %>%
+  pivot_wider(
+    id_cols = c(genus_name, taxa_name),
+    names_from  =  library,
+    values_from =  result
+  ) %>%
+  mutate(across(starts_with("Lib.J."),~replace_na(.x, "absent"))) %>%
+  arrange(.[[2]])
+
+
+# 7 write to table
+write.xlsx(final_genera_table, "potential_species_of_interest.xlsx")
+head(final_genera_table)
+```
+
+
+# The real code, which works
+```{r, echo = FALSE}
+# Load & clean indicator species list
+indicator_list <- read.xlsx("E:/Msc/Thesis/Data/indicator species.xlsx", sheet = 3,
+                            colNames = TRUE, rowNames = FALSE, skipEmptyCols = TRUE) %>%
+  mutate(
+    Indicator_species = str_trim(str_to_lower(Indicator_species))
+  )
+
+# Clean your df_indicator
+df_indicator <- df_indicator %>%
+  mutate(
+    taxa_name = str_trim(str_to_lower(taxa_name)),
+    genus_name = str_trim(str_to_lower(genus_name))
+  )
+
+# === Step 1: Prep species present in DB ===
+species_in_DB <- indicator_list %>%
+  filter(Species_in_DB == "Yes") %>%
+  mutate(
+    taxa_name = Indicator_species,
+    genus_name = word(Indicator_species, 1)
+  ) %>%
+  select(Indicator_species, Species_in_DB, Genus_in_DB, genus_name, taxa_name)
+
+# === Step 2: Join read counts for present species ===
+joined_species <- df_indicator %>%
+  filter(taxa_name %in% species_in_DB$taxa_name) %>%
+  mutate(read_status = case_when(
+    genus_count_assembly >= 100 ~ as.character(genus_count_assembly),
+    genus_count_assembly < 100  ~ "insufficient reads",
+    TRUE                        ~ "not present"
+  )) %>%
+  select(taxa_name, library, read_status)
+
+# === Step 3: Pivot to wide ===
+wide_taxa_table <- joined_species %>%
+  pivot_wider(names_from = library, values_from = read_status)
+
+# === Step 4: Join back to full list ===
+joined_indicator_list <- species_of_interest %>%
+  left_join(wide_taxa_table, by = "taxa_name") %>%
+  select(-taxa_name, -genus_name) %>%
+  right_join(indicator_list, by = "Indicator_species") # ensures all species present
+
+# === Step 5: Get genus-level status and max reads ===
+indicator_status_list <- indicator_list %>%
+  mutate(
+    genus_name = word(Indicator_species, 1),
+    status = if_else(genus_name %in% df_indicator$genus_name, "present", "absent")
+  )
+
+# Get max per-genus per-library read count
+max_genus_reads <- df_indicator %>%
+  group_by(genus_name, library) %>%
+  summarise(max_genus_count = max(genus_count_assembly, na.rm = TRUE), .groups = "drop")
+
+# === Step 6: Reshape wide to long to join max reads ===
+long_reads <- joined_indicator_list %>%
+  pivot_longer(cols = starts_with("Lib.J."),
+               names_to = "library",
+               values_to = "read_status")
+
+# Add genus, species info, max reads per library
+long_enriched <- long_reads %>%
+  left_join(indicator_status_list %>% select(Indicator_species, genus_name,status),
+            by = "Indicator_species") %>%
+  left_join(max_genus_reads, by = c("genus_name", "library")) %>%
+  mutate(read_status = case_when(
+    Genus_in_DB == "Yes" & status == "absent" ~ "absent",
+    Species_in_DB == "No" & status == "present" ~ paste("max read in genus -", max_genus_count),
+    TRUE ~ read_status
+  ))
+
+# === Step 7: Pivot back to wide format ===
+final_table <- long_enriched %>%
+  select(Indicator_species, library, read_status) %>%
+  pivot_wider(names_from = library, values_from = read_status) %>%
+  left_join(indicator_list, by = "Indicator_species") %>%
+  relocate(Indicator_species)  # put species first
+
+indicator_order <- indicator_list %>%
+  select(Indicator_species, original_order)
+
+final_table <- final_table %>%
+  left_join(indicator_order, by = "Indicator_species") %>%
+  arrange(original_order) %>%
+  select(-original_order)
+
+final_table <- final_table %>%
+  mutate(across(starts_with("Lib.J"), ~ case_when(
+    is.na(.x) ~ "absent",
+    .x == "max read in genus - NA" ~ "absent",
+    TRUE ~ .x
+  )))
+
+
+# === Step 8: Save to Excel ===
+write.xlsx(final_table, "E:/Msc/Thesis/Data/indicator_species_list.xlsx")
+
+```

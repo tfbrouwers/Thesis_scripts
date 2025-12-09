@@ -1,0 +1,246 @@
+---
+title: "Agriculture Heatmap"
+author: "Tom Brouwers"
+date: "2025-09-30"
+output: pdf_document
+---
+```{r, echo=FALSE}
+library(patchwork)
+library(readxl)
+library(ggplot2)
+library(dplyr)
+library(writexl)
+library(tidyverse)
+library(scales)
+library(tidyr)
+library(tidytext)
+
+getwd()
+setwd("E:/Msc/Thesis/R")
+
+```
+# Create agriculutre set from df_genus
+```{r, echo=FALSE}
+agri_list <- c(
+    # Livestock
+    "Bos"   ,
+    "Ovis"  ,
+    "Sus"   ,
+    "Capra" ,
+    # Pasture
+    "Prunella"      ,
+    "Phleum"        ,
+    "Chrysanthemum" ,
+    "Plantago"      ,
+    "Trifolium"     ,
+    # Pulse
+    "Lens"    ,
+    "Pisum"   ,
+    # Oils/Fibres
+    "Linum"   ,
+    "Papaver" ,
+    "Canabis" ,
+    "Camelina",
+    "Brassica",
+    # Cereals
+    "Triticum",
+    "Hordeum" ,
+    "Secale"  ,
+    "Avena"   ,
+    "Panicum" 
+)
+# order of groups
+group_list <- c(
+  "Cereal",
+  "Pulse" ,
+  "Oil/Fibre",
+  "Pasture",
+  "Livestock"
+)
+# site assign list
+site_assign <- 
+
+# order of sites
+site_list <- c(
+  "M",
+  "W1",
+  "W2"
+)
+  
+  
+  
+  
+df_agr <- df_genus %>%
+  filter(!library == "Lib.J.1044") %>%
+  filter(genus_name %in% agri_list) %>%
+  select(library, genus_name, genus_count_assembly) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = genus_count_assembly,
+    values_fill = 0
+  ) %>%
+  pivot_longer(-library, names_to = "genus_name", values_to = "genus_count_assembly") %>%
+  mutate(genus_name = factor(genus_name, levels = agri_list))
+
+
+
+# Define bins
+breaks <- c(0,  1, 10, 100, 1000, 10000, Inf)
+labels <- c("0", "1–10", "10–100", "100–1,000", "1,000–10,000", ">10,000")
+# add labels based on genus_count_assembly
+df_agr <- df_agr %>%
+  mutate(count_bin = cut(
+    genus_count_assembly, 
+    breaks = breaks,
+    labels = labels,
+    include.lowest = TRUE,
+    right = FALSE
+  )) %>%
+  mutate(group = case_when(
+    genus_name %in% c("Avena", "Hordeum") ~ "Cereal",
+    genus_name %in% c("Papaver", "Linum") ~ "Oil/Fibre", 
+    genus_name %in% c("Pisum") ~ "Pulse",
+    genus_name %in% c("Trifolium", "Plantago", "Prunella") ~ "Pasture",
+    genus_name %in% c("Capra", "Ovis", "Sus", "Bos") ~ "Livestock"
+  )) %>%
+  mutate(group = factor(group, levels = group_list)) %>%
+    mutate(site = case_when( # here we add location for each library
+    str_detect(library, "1036")  ~ "M"  ,
+    str_detect(library, "1037")  ~ "M"  ,
+    str_detect(library, "1038")  ~ "M"  ,
+    str_detect(library, "1039")  ~ "W2" ,
+    str_detect(library, "1040")  ~ "W2" ,
+    str_detect(library, "1041")  ~ "W2" ,
+    str_detect(library, "1042")  ~ "W2" ,
+    str_detect(library, "1043")  ~ "W2" ,
+    str_detect(library, "1044")  ~ "W1" ,
+    str_detect(library, "1045")  ~ "W1" ,
+    str_detect(library, "1046")  ~ "W1" ,
+    str_detect(library, "1047")  ~ "W1"  
+  )) %>%
+  mutate(library = str_remove(library, "^Lib\\.J\\.")) %>%
+  mutate(site = factor(site, levels = site_list))
+```
+
+
+# Make heat map plot
+```{r, echo=FALSE}
+df_agr <- df_agr %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+
+heatmap_agr <- ggplot(df_agr, aes(x = library, y = genus_name, fill = count_bin)) +
+  geom_tile(colour = "grey") +
+  facet_grid(group ~ site, scales = "free", space = "free") +
+  scale_fill_manual(
+    values = c(
+      "0"            = "grey90",
+      "1–10"         = "#FFFACD",
+      "10–100"       = "#FFE680",
+      "100–1,000"    = "#FFD700",
+      "1,000–10,000" = "#FFC300",
+      ">10,000"      = "#B8860B"),
+    name = "genus_count_assembly",
+    drop = FALSE
+  ) +
+  labs(
+    x    = "",
+    y    = ""  
+  ) +  
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text.y    = element_text(size = 16, hjust = 0.01, face = "italic"),
+    axis.text.x = element_text(size = 18, angle = 45, hjust = 1, face = "bold"),
+    axis.title   = element_text(size = 22),
+    axis.title.x = element_blank(),
+    strip.text.x = element_text(size = 24, face = "bold"),
+    strip.text.y = element_text(size = 18),
+    legend.title = element_text(size = 20),
+    legend.text = element_text(size = 20)
+    )
+
+heatmap_agr
+
+ggsave("E:/Msc/Thesis/Data/Plots/Heatmaps/Agriculture_map1.jpg", plot = heatmap_agr, width = 30, height = 20, units = "cm" ,dpi = 300)
+
+```
+
+# FInal Figure
+```{r, echo = FALSE}
+# 1) Sum reads per library × group (keep site)
+df_agr_summed <- df_agr %>%
+  # ensure numeric
+  mutate(genus_count_assembly = as.numeric(genus_count_assembly)) %>%
+  # drop rows without a defined group
+  filter(!is.na(group)) %>%
+  group_by(site, library, group) %>%
+  summarise(total_reads = sum(genus_count_assembly, na.rm = TRUE), .groups = "drop")
+
+# 2) (optional) compute relative contribution of each group within each library
+df_agr_summed <- df_agr_summed %>%
+  group_by(library) %>%
+  mutate(rel_contribution = total_reads / sum(total_reads, na.rm = TRUE)) %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+
+## ensure library ordering is stable
+df_plot <- df_agr_summed %>%
+  mutate(library = factor(library, levels = unique(library)))
+
+# define non-livestock groups (adjust if your groups differ)
+non_liv_groups <- c("Cereal", "Pasture", "Pulse", "Oil/Fibre")
+
+# generate a small range of yellow hues for the non-livestock groups
+yellows <- c(
+  "Cereal"    = "goldenrod2",
+  "Pasture"   = "#6aa84f",
+  "Pulse"     = "#e69138",
+  "Oil/Fibre" = "#783f04"
+)
+
+# complete color map including livestock = red
+color_map <- c(yellows, "Livestock" = "#ff7000")
+
+# shared fill scale with vertical stacked legend (one column)
+shared_fill <- scale_fill_manual(
+  values = color_map,
+  breaks = names(color_map),
+  na.value = "grey80",
+  guide = guide_legend(ncol = 1)  # <- stack legend vertically
+)
+
+
+# Panel A: non-livestock
+p1 <- ggplot(df_plot %>% filter(group != "Livestock"),
+             aes(x = library, y = total_reads, fill = group)) +
+  geom_col(position = "stack", width = 0.7) +
+  facet_grid(. ~ site, scales = "free_x") +
+  scale_y_continuous(labels = comma_format()) +
+  shared_fill +
+  labs(x = NULL, y = "reads", title = "Agricultural signals") +
+  my_theme +
+  theme(
+    legend.position = c(0.02, 0.95),
+    legend.justification = c("left","top"),
+    legend.background = element_rect(fill = alpha("white", 0.6), colour = NA)
+  )
+
+# Panel B: livestock only
+p2 <- ggplot(df_plot %>% filter(group == "Livestock"),
+             aes(x = library, y = total_reads, fill = group)) +
+  geom_col(width = 0.7) +
+  facet_grid(. ~ site, scales = "free_x") +
+  scale_y_continuous(labels = comma_format()) +
+  shared_fill +
+  labs(x = NULL, y = "reads", title = NULL) +
+  my_theme +
+  theme(
+    legend.position = c(0.02, 0.95),
+    legend.justification = c("left","top"),
+    legend.background = element_rect(fill = alpha("white", 0.6), colour = NA)
+  )
+# combine and collect a single vertical legend
+combined <- p1 / p2 + plot_layout(heights = c(2,1))
+combined
+
+
+ggsave("E:/Msc/Thesis/Data/Plots/Final figure/agriculture_clean.jpg", combined, width = 30, height = 15, units = "cm", dpi = 300)
+```

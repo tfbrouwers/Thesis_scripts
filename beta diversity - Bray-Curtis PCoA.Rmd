@@ -1,0 +1,692 @@
+---
+title: "beta diversity - Bray-Curtis PCoA"
+author: "Tom Brouwers"
+date: "2025-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(vegan)
+library(patchwork)
+library(Polychrome)
+library(colorspace)
+library(RColorBrewer)
+library(ape)
+library(readxl)
+library(betapart)
+library(ggrepel)
+library(cowplot)
+library(ggh4x)
+library(shadowtext)
+getwd()
+setwd("E:/Msc/Thesis/R")
+
+
+```
+# Bray-Curtis PCoA for assessing Variance between libraries
+## We want a Bray-Curtis PCoA. First we make genus relative abundance tabel, import from alpha analysis
+```{r, echo=FALSE}
+# only plants, exlcude underperforming library 1044
+df_plants <- df_genus_2504 %>%
+  filter(phylum_name %in% c(
+  "Streptophyta",       
+  "Chlorophyta" ,          
+  "Rhodophyta"          
+  )) %>%
+  mutate(library = str_remove(library, "Lib.J.")) %>%
+  filter(!library == "1044") %>%
+  filter(!status %in% c("absent", "introduced"))
+# abundance from own data
+df_abs_veg_genus <- df_plants %>%
+  select(library,  genus_name, genus_count_assembly) %>%
+  pivot_wider(
+    names_from = genus_name,
+    values_from = genus_count_assembly,
+    values_fill = 0
+  ) %>%
+  column_to_rownames("library") %>%
+  mutate(across(everything(), as.numeric))
+
+# here is the relative data
+df_veg_rel <- df_abs_veg_genus %>%
+  {./rowSums(.)}
+
+df_veg_comb <- df_veg_rel %>%
+  rownames_to_column("samples")
+
+
+```
+
+## now we calculate bray-curtis distance 1 = only libraries
+```{r, echo=FALSE}
+bray_dist_genus1 <- vegdist(df_veg_rel, method = 'bray')
+```
+
+## from this we make a Principal Coordinate Analysis (PCoA)
+```{r, echo=FALSE}
+pcoa_genus1 <- pcoa(bray_dist_genus1)
+
+# we also calculate variance explained so we can plot it for each axis later
+var_explained1 <- 100 * pcoa_genus1$values$Relative_eig
+```
+## Now we visualise this pcoa, we also want to add meta data so we can link libs to locations
+```{r, echo=FALSE}
+# first only select asxis we want to plot (first two) and add right names to pcoa scores
+
+pcoa_scores1 <- as_tibble(pcoa_genus1$vectors[,1:2], .name_repair = "minimal") %>%
+  mutate( library = rownames(df_veg_rel))
+
+
+# meta group data
+group_meta_data1 <- pcoa_scores1 %>%
+  select(library) %>%
+  mutate(site = case_when(
+    library %in% c("1036", "1037", "1038") ~ "Moehne",
+    library %in% c("1044", "1045", "1046", "1047") ~ "Wester 1",
+    library %in% c("1039", "1040", "1041", "1042", "1043") ~ "Wester 2"
+  ))
+
+# add meta data
+
+pcoa_scores1 <- left_join(pcoa_scores1, group_meta_data1, by = "library")
+
+```
+
+## I also want to add age for each sample to plot this as third PCoA as we have intersting gradient
+```{r, echo=FALSE}
+ages <- read.csv("E://Msc/Thesis/R/age_table.csv", header = TRUE, sep = ",") %>%
+  mutate(sample = str_remove(sample, "Lib.J.")) %>%
+  rename(sample, library = sample)
+
+pcoa_scores1 <- left_join(pcoa_scores1, ages, by = "library")
+```
+
+
+## Plotting
+```{r, echo=TRUE}
+location_colours <- c(
+  "Moehne"   = "tomato",    
+  "Wester 1" = "#C800FF",   
+  "Wester 2" = "blue" 
+)
+
+xlab1 <- sprintf("PCoA 1 (%.1f%%)", var_explained1[1])
+ylab1 <- sprintf("PCoA 2 (%.1f%%)", var_explained1[2])
+
+
+# this is for getting manual order in the legend
+pcoa_scores1$site <- factor(pcoa_scores1$site,  levels = c("Moehne", "Wester 1", "Wester 2")) 
+pcoa_scores1 <- pcoa_scores1 %>% # this is for nudging W2 labels right and down
+    mutate(nudge_x = case_when(
+    age == "3±0.3"   ~ 0.2,
+    age == "3.2±0.4" ~ 0.2,
+    age == "3.3±0.4" ~ 0.2,
+    age == "3.4±0.4" ~ 0.2,
+    TRUE ~ 0),
+    nudge_y = case_when(
+      age == "3±0.3"   ~ -0.1,
+      age == "3.2±0.4" ~ -0.2,
+      age == "3.3±0.4" ~ -0.3,
+      TRUE ~ 0 
+    ))
+
+
+pcoa_plot1 <- ggplot(pcoa_scores1, aes(x = Axis.1, y = Axis.2)) +
+  geom_hline(yintercept = 0, color = "grey70", linewidth = 1) +
+  geom_vline(xintercept = 0, color = "grey70", linewidth = 1) +
+  geom_point(aes(fill = site), shape=21, colour = "black", size = 3) +
+  scale_x_continuous(limits = c(-1,1)) +
+  scale_y_continuous(limits = c(-0.5, 1)) +
+  scale_fill_manual(values = location_colours, name = "Site") +
+  labs(x = xlab1, y = ylab1, colour = "Site", title = " ") +
+  theme(
+    plot.title = element_text(hjust = 0.5)
+  )
+# this one has ages as labels
+pcoa_plot3 <- ggplot(pcoa_scores1, aes(x = Axis.1, y = Axis.2)) +
+  geom_hline(yintercept = 0, color = "grey70", linewidth = 1) +
+  geom_vline(xintercept = 0, color = "grey70", linewidth = 1) +
+  geom_point(aes(fill = site), shape = 21, colour = "black", size = 3) +
+  scale_x_continuous(limits = c(-1,1)) +
+  scale_y_continuous(limits = c(-0.5, 1)) +
+  geom_label_repel(aes(label = age), size = 3.5, nudge_x = pcoa_scores1$nudge_x, nudge_y = pcoa_scores1$nudge_y) +
+  scale_fill_manual(values = location_colours, name = "Site", guide = "legend") +
+  labs(x = xlab1, y = ylab1, title = "a") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+pcoa_plot1
+pcoa_plot3
+
+```
+
+
+# Give meaning to axis by plotting genera abundance vectors - We use 'strict' versions for figures
+## fit taxa and signif taxa
+```{r}
+fit_taxa <- envfit(pcoa_genus1$vectors, df_veg_rel, permutations = 999 )
+
+signif_taxa <- scores(fit_taxa, display = "vectors") %>%
+  as.data.frame() %>%
+  rownames_to_column("taxon") %>%
+  filter(fit_taxa$vectors$pvals < 0.05) %>%
+  mutate(
+    r  = fit_taxa$vectors$r[fit_taxa$vectors$pvals < 0.05],
+    r2 = r^2,
+    p  = fit_taxa$vectors$pvals[fit_taxa$vectors$pvals < 0.05]
+  ) %>%
+  arrange(desc(r2)) %>%
+  rename(genus_name = taxon)
+
+
+```
+
+## Add grouping by growth form
+```{r, echo=FALSE}
+growth_form <- tribble(
+  ~genus_name,    ~growth_form,
+  # trees
+  "Acer",        "Tree",
+  "Alnus",       "Tree",
+  "Betula",      "Tree",
+  "Casuarina",   "Tree",
+  "Corylus",     "Tree",
+  "Crataegus",   "Tree",
+  "Dipteronia",  "Tree",
+  "Dovyalis",    "Tree",
+  "Fagus",       "Tree",
+  "Fraxinus",    "Tree",
+  "Juglans",     "Tree",
+  "Morella",     "Tree",
+  "Osmanthus",   "Tree",
+  "Picea",       "Tree",
+  "Platycarya",  "Tree",
+  "Populus",     "Tree",
+  "Pyrus",       "Tree",
+  "Salix",       "Tree",
+  "Ulmus",       "Tree",
+  "Zelkova",     "Tree",
+  "Quercus",     "Tree",
+  "Prunus",      "Tree",
+
+  # shrubs
+  "Calluna",     "Shrub",
+  "Erica",       "Shrub",
+  "Rubus",       "Shrub",
+
+  # grasses (Poaceae, Cyperaceae, Juncaceae, etc.)
+  "Agrostis",    "Grass",
+  "Alopecurus",  "Grass",
+  "Bromus",      "Grass",
+  "Carex",       "Grass",
+  "Eleocharis",  "Grass",
+  "Elymus",      "Grass",
+  "Eriophorum",  "Grass",
+  "Hordeum",     "Grass",
+  "Juncus",      "Grass",
+  "Lolium",      "Grass",
+  "Polypogon",   "Grass",
+  "Scirpus",     "Grass",
+  "Secale",      "Grass",
+  "Thinopyrum",  "Grass",
+  "Triticum",    "Grass",
+
+  # herbs
+  "Angelica",    "Herb",
+  "Apium",       "Herb",
+  "Argentina",   "Herb",
+  "Artemisia",   "Herb",
+  "Ballota",     "Herb",
+  "Bidens",      "Herb",
+  "Brassica",    "Herb",
+  "Callitriche", "Herb",
+  "Cannabis",    "Herb",
+  "Capsicum",    "Herb",
+  "Carduus",     "Herb",
+  "Chrysosplenium","Herb",
+  "Cirsium",     "Herb",
+  "Clinopodium", "Herb",
+  "Cnidium",     "Herb",
+  "Cruciata",    "Herb",
+  "Epilobium",   "Herb",
+  "Euphrasia",   "Herb",
+  "Fagopyrum",   "Herb",
+  "Fallopia",    "Herb",
+  "Frullania",   "Herb",
+  "Galeopsis",   "Herb",
+  "Geranium",    "Herb",
+  "Glebionis",   "Herb",
+  "Hemerocallis","Herb",
+  "Humulus",     "Herb",
+  "Jacobaea",    "Herb",
+  "Kitagawia",   "Herb",
+  "Lathyrus",    "Herb",
+  "Leonurus",    "Herb",
+  "Linum",       "Herb",
+  "Lophiolepis", "Herb",
+  "Lotus",       "Herb",
+  "Lysimachia",  "Herb",
+  "Matricaria",  "Herb",
+  "Melittis",    "Herb",
+  "Mentha",      "Herb",
+  "Neckera",     "Herb",
+  "Oenanthe",    "Herb",
+  "Ornithopus",  "Herb",
+  "Oxyria",      "Herb",
+  "Petasites",   "Herb",
+  "Pilosella",   "Herb",
+  "Pisum",       "Herb",
+  "Polygonum",   "Herb",
+  "Potentilla",  "Herb",
+  "Ranunculus",  "Herb",
+  "Raphanus",    "Herb",
+  "Reichardia",  "Herb",
+  "Reynoutria",  "Herb",
+  "Rheum",       "Herb",
+  "Rhinanthus",  "Herb",
+  "Rumex",       "Herb",
+  "Schizonepeta","Herb",
+  "Senecio",     "Herb",
+  "Sideritis",   "Herb",
+  "Silybum",     "Herb",
+  "Sparganium",  "Herb",
+  "Spergula",    "Herb",
+  "Stachys",     "Herb",
+  "Stenogyne",   "Herb",
+  "Tanacetum",   "Herb",
+  "Torilis",     "Herb",
+  "Trifolium",   "Herb",
+  "Urtica",      "Herb",
+  "Veronica",    "Herb",
+  "Vicia",       "Herb",
+  "Filipendula", "Herb",
+  "Persicaria",  "Herb",
+  "Plantago",    "Herb",
+  
+  # Other
+  "Other",      " "
+)
+
+# Herbs are too numerous so we want to group them further to keep plots readable. Main point is open vs closed landscape. Asterales and Poales in Europe point to this. 
+# join with singif_taxa so we can make sepearte df's per group for plotting in colour
+# also add order_name so we can seperate them based on poales asterales and others
+df_plants_genera <- df_plants %>%
+  group_by(genus_name) %>%
+  summarise(order_name = unique(order_name))
+
+signif_taxa <- signif_taxa %>%
+  left_join(growth_form, by = "genus_name") %>%
+  left_join(df_plants_genera %>% select(genus_name, order_name), by = "genus_name") %>%
+  select("order_name", "genus_name", "Axis.1", "Axis.2", "r", "r2", "p", "growth_form")
+
+#--------------------- Stricter R2 --------------------------------------
+signif_taxa_strict <- signif_taxa %>%
+  filter(r2 > 0.39)
+
+
+```
+
+## Add Ellenberg Numbers
+```{r, echo=FALSE}
+#ellen_traits_brian <- read_delim("traits_valEllenberg.txt")
+#ellen_traits_synbiosys <- read_xlsx("E:/Msc/Thesis/Data/Vegetation/Botanisch Basisregister - SynBioSys.xlsx")
+
+
+list_pattern <- signif_taxa$genus_name %>%
+  str_c(collapse = "|")
+
+ellen_traits <- ellen_traits_synbiosys %>%
+  filter(
+    str_detect(`Wetenschappelijke naam`, regex(list_pattern, ignore_case=TRUE)),
+    (`Herkomst 1` == 1 |`Herkomst 2` == 1)
+  ) %>%
+  select(
+    `Wetenschappelijke naam`, `Lichtindicatie - Ellenberg`, `Vochtindicatie - Ellenberg`
+  )
+
+et_genus <- ellen_traits %>% # et = ellen traits. now we summarise the synbiosys data per genus, so collaps species specific numbers to genus level, as we do not have species level. 
+  mutate(genus_name = word(`Wetenschappelijke naam`, 1)) %>%
+  group_by(genus_name) %>%
+  summarise(
+    light_min = min(`Lichtindicatie - Ellenberg`, na.rm = TRUE),
+    light_max = max(`Lichtindicatie - Ellenberg`, na.rm = TRUE),
+    light_mean = mean(`Lichtindicatie - Ellenberg`, na.rm = TRUE),
+    
+    moist_min = min(`Vochtindicatie - Ellenberg`, na.rm = TRUE),
+    moist_max = max(`Vochtindicatie - Ellenberg`, na.rm = TRUE),
+    moist_mean = mean(`Vochtindicatie - Ellenberg`, na.rm = TRUE),
+    
+    n_species = n()
+  ) %>%
+  mutate(
+      moist_min = case_when(
+      genus_name %in% c("Ulmus","Fraxinus", "Corylus") & is.infinite(moist_min) ~ 6,  # set new values from synbiosys
+      genus_name %in% c("Linum", "Calluna") & is.infinite(moist_min) ~ 5,
+      TRUE ~ moist_min
+    ),
+    moist_max = case_when(
+      genus_name %in% c("Fraxinus") & is.infinite(moist_max) ~ 7,
+      genus_name %in% c("Ulmus", "Corylus", "Linum", "Calluna") & is.infinite(moist_max) ~ 6,
+      TRUE ~ moist_max
+    ))
+#--------------------------------------------------------------------------------------------------------------------------------------
+ #Now we have ET's make crude groupings from this
+et_genus <- et_genus %>%
+  mutate(
+    light_group = case_when(
+      # if the reported min/max differ by more than 2, mark non-informative
+     (light_max - light_min) > 2 ~ "non-informative",
+
+      
+      light_mean >= 7.5                          ~ "light",
+      light_mean >= 6.5 & light_mean < 7.5      ~ "half-light",
+      light_mean >= 5.5 & light_mean < 6.5      ~ "half-light to half-shadow",
+      light_mean >= 4   & light_mean < 5.5      ~ "half-shadow",
+      !is.na(light_max) & light_max < 4         ~ "shadow",
+      TRUE ~ "non-informative"
+    ),
+    
+    moist_group = case_when(
+      moist_min >= 9 ~ "Aquatic",
+      moist_min >= 7 & moist_max <= 9 ~ "Moist",
+      moist_min >= 4 & moist_max <=7 ~ "Mesic",
+      moist_max < 4 ~ "Dry",
+      TRUE ~ "non-informative moisture"
+    )
+  )
+
+
+# ----------------------------------------------------------------------------- now add this data to vectors --------------------------------------
+signif_taxa <- signif_taxa %>%
+  right_join(et_genus, by = "genus_name")
+
+signif_taxa_strict <- signif_taxa_strict %>%
+  right_join(et_genus, by = "genus_name")
+```
+## Read in each group as df + Colour schemes and Orders
+```{r}
+#strict versions
+strict_taxa_top <- signif_taxa_strict %>%
+  slice_max(order_by = r2, n = 10)
+
+strict_taxa_herb <- signif_taxa_strict %>%
+  filter(growth_form == "Herb")
+
+strict_taxa_shrub <- signif_taxa_strict %>%
+  filter(growth_form == "Shrub")
+
+strict_taxa_tree <- signif_taxa_strict %>%
+  filter(growth_form == "Tree")
+
+strict_taxa_grass <- signif_taxa_strict %>%
+  filter(growth_form == "Grass")
+
+strict_taxa_grass_trees <- signif_taxa_strict %>% # Grasses and Trees together 
+  filter(growth_form %in% c("Tree", "Grass"))
+
+strict_taxa_gth <- signif_taxa_strict %>% # grasses, trees, herbs together
+  filter(growth_form %in% c("Grass", "Tree", "Herb"))
+
+
+# Give colours
+arrow_colours <- c("Grass" = "orange3", "Herb" = "deeppink", "Shrub" = "indianred4", "Tree" = "green4")
+
+
+order_colours <- c(
+  "Asterales"    = "#C42F23",
+  "Poales"       = "#FF960D",
+  "Fagales"      = "forestgreen",
+  "Ericales"     = "#31CCBC",
+  "Ranunculales" = "#CC00DE"
+)
+
+et_order_colours <- c(
+  "light"                               = "darkgoldenrod1",
+  "half-light"                          = "#F57E00",
+  "half-light to half-shadow"           = "#B0743A",
+  "half-shadow"                         = "#8C3D11",
+  "shadow"                              = "#2E221D",
+  "non-informative"                     = "grey70"
+)
+
+# Set levels (factor)
+order_order <- c(
+  "Fagales",
+  "Ericales",
+  "Ranunculales",
+  "Asterales",
+  "Poales"
+)
+et_order_order <- c(
+  "light",
+  "half-light",
+  "half-light to half-shadow",
+  "half-shadow",
+  "shadow",
+  "non-informative"
+)
+```
+
+## Set Orders
+```{r, echo = FALSE}
+signif_taxa_strict <- signif_taxa_strict %>%
+  mutate(light_group = factor(light_group, levels = et_order_order),
+         moist_group = factor(moist_group, levels = et_order_order))
+```
+
+## Plotting
+```{r, echo=FALSE}
+# Trees and Grasses Together
+pcoa_strict_tree_grass <- pcoa_plot1 +
+  geom_segment(
+    data = strict_taxa_grass_trees,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = Axis.1, yend = Axis.2, colour = growth_form),
+    arrow = arrow(length = unit(0.2, "cm")),
+    linewidth = 1
+  ) +
+  labs(title = "b") +
+  geom_point(aes(fill = site), shape = 21, colour = "black", size = 3) +
+  geom_text_repel(data = strict_taxa_grass_trees,
+                  inherit.aes = FALSE,
+                  aes(x = Axis.1, y = Axis.2, label = genus_name, colour = growth_form), 
+                  size = 3.5,
+                  box.padding = 0.25,
+                  max.overlaps = Inf) +
+  scale_colour_manual(values = arrow_colours, name = "Vegetation type") +
+  guides(fill = "none")
+
+# Herbs only
+pcoa_strict_herb <- pcoa_plot1 +
+  geom_segment(
+    data = strict_taxa_herb,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = Axis.1, yend = Axis.2, colour = order_name),
+    arrow = arrow(length = unit(0.2, "cm")),
+    linewidth = 1
+  ) +
+  labs(title = "c") +
+  geom_point(aes(fill = site), shape = 21, colour = "black", size = 3) +
+  geom_text_repel(
+    data = strict_taxa_herb,
+    inherit.aes = FALSE,
+    aes(x = Axis.1, y = Axis.2, label = genus_name, colour =  order_name),
+    force = 5,
+    size = 3.5
+  ) +
+  #scale_colour_manual(values = arrow_colours, name = "group") +
+  guides(fill = "none") +
+  labs(color = "Order")
+
+pcoa_strict_et_l <- pcoa_plot1 +
+  geom_segment(
+    data = signif_taxa_strict,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = Axis.1, yend = Axis.2, colour = light_group),
+    arrow = arrow(length = unit(0.2, "cm")),
+    linewidth = 1
+  ) +
+  labs(title = "c") +
+  geom_point(aes(fill = site), shape = 21, colour = "black", size = 3) +
+  geom_text_repel(
+    data = signif_taxa_strict,
+    inherit.aes = FALSE,
+    aes(x = Axis.1, y = Axis.2, label = genus_name, colour =  light_group),
+    size = 3.5
+  ) +
+  scale_colour_manual(values = et_order_colours, name = "Light preference") +
+  guides(fill = "none")
+# Trees, Graasssses Herbs
+pcoa_strict_gth2 <- pcoa_plot1 +
+  geom_segment(
+    data = strict_taxa_gth,
+    inherit.aes = FALSE,
+    aes(x = 0, y = 0, xend = Axis.1, yend = Axis.2, colour = growth_form),
+    arrow = arrow(length = unit(0.2, "cm")),
+    linewidth = 1
+  ) +
+  geom_point(aes(fill = site), shape = 21, colour = "black", size = 3) +
+  labs(title = "b") +
+  #geom_text_repel(data = strict_taxa_gth,
+   #               inherit.aes = FALSE,
+    #              aes(x = Axis.1, y = Axis.2, label = genus_name, colour = growth_form), 
+     #             size = 3.5,
+      #            box.padding = 0.25,
+      #            max.overlaps = Inf) +
+  scale_colour_manual(values = arrow_colours, name = "Vegetation type") +
+  guides(fill = "none")
+
+pcoa_strict_tree_grass
+pcoa_strict_herb
+pcoa_strict_et_l
+pcoa_strict_gth2
+
+```
+
+## Set right font size etc for each plot + grab legends
+```{r, echo = FALSE}
+
+
+theme_final <-   theme( 
+    plot.title   = element_text(size = 20, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 12),
+    axis.title   = element_text(size = 14),
+    legend.text  = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    legend.position = "none")
+
+pcoa_plot3_clean <- pcoa_plot3 + theme_final
+pcoa_strict_tree_grass_clean <- pcoa_strict_tree_grass + theme_final 
+pcoa_strict_herb_clean <- pcoa_strict_herb + theme_final 
+pcoa_strict_et_l_clean <- pcoa_strict_et_l + theme_final 
+pcoa_strict_gth_clean2 <- pcoa_strict_gth2 + theme_final
+```
+
+## Make grid of plots, make master legend
+```{r, echo = FALSE}
+# grab legends per plot
+leg_a <- get_legend(pcoa_plot3)
+leg_b <- get_legend(pcoa_strict_tree_grass)
+leg_c <- get_legend(pcoa_strict_herb)
+leg_d <- get_legend(pcoa_strict_et_l)
+
+leg_d
+# remove legends and titles from plots
+pcoa_plot3 <- pcoa_plot3 + theme(legend.position = "none", plot.title = element_blank())
+pcoa_strict_tree_grass <- pcoa_strict_tree_grass + theme(legend.position = "none", plot.title = element_blank())
+pcoa_strict_herb <- pcoa_strict_herb + theme(legend.position = "none", plot.title = element_blank())
+pcoa_strict_et_l <- pcoa_strict_et_l + theme(legend.position = "none", plot.title = element_blank())
+
+# combine into grid
+plots_2x2 <- plot_grid(
+  pcoa_plot3, pcoa_strict_tree_grass,
+  pcoa_strict_herb, pcoa_strict_et_l,
+  labels = c("a", "b", "c", "d"),
+  label_size = 14,
+  ncol = 2
+)
+# combine legends
+legends_row <- plot_grid(
+  leg_a, leg_b, leg_c, leg_d,
+  ncol = 4,
+  align = "h",
+  rel_widths = c(1, 1, 1, 1)
+)
+
+# stack plots and legends
+final_fig <- plot_grid(
+  plots_2x2,
+  legends_row,
+  ncol = 1,
+  rel_heights = c(1, 0.18)  # adjust height of legend area
+)
+
+
+final_fig
+
+leg_a
+```
+## to save
+```{r}
+# Beta-Diversity plot with age as labels
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_bd_age.jpg", plot = pcoa_plot3, width = 15, height = 12.5, units = "cm", dpi = 300)
+
+# Vector plots save
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_vec_tree_grass.jpg", plot = pcoa_strict_tree_grass, width = 15, height = 12.5, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_vec_herb.jpg", plot = pcoa_strict_herb, width = 15, height = 12.5, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_vec_et_l.jpg", plot = pcoa_strict_et_l, width = 15, height = 12.5, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_TG2H.jpg", plot = pcoa_strict_gth2, width = 15, height = 12.5, units = "cm", dpi = 300)
+# WITHOUT LEGENDS
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_bd_age_clean.jpg", plot = pcoa_plot3_clean, width = 15, height = 12.5, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_vec_tree_grass_clean.jpg", plot = pcoa_strict_tree_grass_clean, width = 15, height = 12.5, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_vec_herb_clean.jpg", plot = pcoa_strict_herb_clean, width = 15, height = 12.5, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_vec_et_l_clean.jpg", plot = pcoa_strict_et_l_clean, width = 15, height = 12.5, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_vec_TGH_clean2.jpg", plot = pcoa_strict_gth_clean2, width = 15, height = 12.5, units = "cm", dpi = 300)
+#ggsave("E:/Msc/Thesis/Data/Plots/Diversity/report_pcoa_final_fig.jpg", plot = final_fig, width = 25, height = 30, units = "cm", dpi = 300)
+
+
+```
+
+# Final Figure
+```{r, echo = FALE}
+open_taxa <- c("Hordeum", "Mentha", "Lolium","Rhinanthus", "Juncus", "Elymus", "Trifolium", "Tanacetum")
+
+open_taxa2 <- df_genus_2504 %>%
+  select(library, genus_name, genus_count_assembly, site) %>%
+  filter(genus_name %in% open_taxa)
+
+df_open_sum <- open_taxa2 %>%
+  mutate(genus_count_assembly = as.numeric(genus_count_assembly)) %>%
+  group_by(site, library) %>%
+  summarise(open_reads = sum(genus_count_assembly, na.rm = TRUE), .groups = "drop") %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+
+open_fill <- c("Open taxa" = "gold2")  # light yellow
+
+my_theme <- theme(
+  plot.title   = element_text(size = 24, hjust = 0.5),
+  axis.text.y    = element_text(size = 18),
+  axis.text.x  = element_blank(),
+  axis.title   = element_blank(),
+  strip.text   = element_blank(),
+  legend.title = element_blank(),
+  legend.text  = element_text(size = 20),
+  legend.position = "bottom",
+  legend.direction = "vertical",
+  legend.box = "vertical"
+)
+
+df_open_sum <- df_open_sum %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+
+p_abs <- ggplot(df_open_sum, aes(x = library, y = open_reads)) +
+  geom_col(width = 0.70, fill = "gold2") +
+  facet_grid(. ~ site, scales = "free_x") +
+  scale_y_continuous(labels = comma_format()) +
+  scale_fill_manual(values = open_fill, breaks = names(open_fill)) +
+  labs(x = NULL, y = "", title = "Open landscape related reads")  + 
+  my_theme
+p_abs
+
+ggsave("E:/Msc/Thesis/Data/Plots/Final figure/open_taxa.jpg", p_abs, width = 30, height = 20, units = "cm", dpi = 300)
+```

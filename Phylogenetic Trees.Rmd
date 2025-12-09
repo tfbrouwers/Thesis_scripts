@@ -1,0 +1,343 @@
+---
+title: "Creating Phylogenetic Trees"
+author: "Tom Brouwers"
+date: "2025-05-27"
+output: pdf_document
+---
+
+```{r, echo=FALSE, include=FALSE}
+# load libraries
+library(tidyr)
+library(tidyverse)
+library(dplyr)
+library(ape)
+library(taxize)
+library(ggtree)
+library(rotl)
+library(treeio)
+library(openxlsx)
+#set wd
+#set wd and load data
+getwd()
+setwd("E:/Msc/Thesis/R")
+```
+# We will do it per genus, only the species that are realistic, so more manual approach
+
+## For rectangular tree
+
+```{r, echo=FALSE}
+vector_solanum <- df_indicator %>%
+  filter(genus_name == "Solanum") %>%
+  ungroup() %>%
+  distinct(taxa_name) %>%
+  pull(taxa_name) %>%
+  as.character()
+
+ulmus_xlsx <- read.xlsx("E:/Msc/Thesis/R/indicator_present_list.xlsx", "ulmus list", colNames = TRUE )
+
+ulmus_status <- ulmus_xlsx[[3]]  %>%
+  head(ulmus_status, n = 5)
+
+ulmus_list <- c(ulmus_xlsx[[1]])
+# Here we get the NCIB uids
+uid_ulmus <- get_uid(ulmus_list) 
+# this matches our NCIB ids to Open Tree of Life df
+matches_ulmus <- tnrs_match_names(ulmus_list)
+# ott ids are Open Tree of Life Taxonomy handlers, they identify taxa (from internet)
+ott_ids_ulmus <- matches_ulmus$ott_id
+
+pruned_ott_ids <- c(5146847)
+clean_ott_ids <- ott_ids_ulmus[ott_ids_ulmus != pruned_ott_ids]
+
+tree_ulmus <- tol_induced_subtree(ott_ids = clean_ott_ids)
+
+
+tree_ulmus$tip.label <- tree_ulmus$tip.label %>%
+  str_remove("_ott\\d+$") %>%
+  str_replace("^Ulmus ", "U. ") %>%
+  str_replace_all("_", " ") %>%
+  sort()
+# make groups
+ulmus_groups <- data.frame(
+  species = tree_ulmus$tip.label,
+  status  = ulmus_status
+)
+
+
+tree_ulmus <- compute.brlen(tree_ulmus, method = "Grafen")
+
+for_x_max <- ggtree(tree_ulmus, layout = "rectangular") %<+% ulmus_groups +
+  geom_rootedge(rootedge = 0.2) +
+  geom_tiplab(size = 3, hjust = 0.5, vjust = 1.5, offset = 0) +
+  geom_tippoint(aes(color = group), shape = 15, size = 3, position = position_nudge(x = 0.0)) +
+  scale_color_manual(values = c(
+    "non-indicator"       = "orange2",
+    "indicator in DB"     = "green2",
+    "unrealistic species" = "red2",
+    "indicator not in DB" = "yellow2"
+  ))+
+  labs(
+    title = "Ulmus phylotree"
+  ) +
+  theme_tree(
+    legend.position = "right"
+  ) 
+
+max_x <- max(for_x_max$data$x, na.rm = TRUE)
+
+ulmus_tree <- ggtree(tree_ulmus, layout = "fan") %<+% ulmus_groups +
+  geom_rootedge(rootedge = 0.2) +
+  geom_tiplab2(size = 4, nudge_y = 0, nudge_x = 0.05, angle = 0) +
+  geom_tippoint(aes(color = status), shape = 15, size = 3, position = position_nudge(x = 0.0)) +
+  scale_color_manual(values = c(
+    "non-indicator"       = "orange2",
+    "indicator in DB"     = "green2",
+    "unrealistic species" = "red2",
+    "indicator not in DB" = "yellow2"
+  ))+
+  labs(
+    title = "Ulmus Phylotree"
+  ) +
+  theme_tree(
+    legend.position = "right",
+    plot.title   = element_text(size = 18, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 10),
+    axis.title   = element_text(size = 10),
+    legend.text  = element_text(size = 14),
+    legend.title = element_text(size = 14)
+  ) + 
+  xlim(-0.2, max_x + 0.2)
+plot(ulmus_tree)
+
+# Convert to phylo format if possible
+#phylo_tree <- read.tree(text = tree$newick)
+
+```
+# This is for a fan tree
+```{r}
+vector_chrysosplenium <- df_indicator %>%
+  filter(genus_name == "chrysosplenium") %>%
+  ungroup() %>%
+  distinct(taxa_name) %>%
+  pull(taxa_name) %>%
+  as.character()
+
+chrysosplenium_xlsx2 <- read.xlsx("E:/Msc/Thesis/R/indicator_present_list.xlsx", "Chrysosplenium complete", colNames = TRUE )
+
+
+chrysosplenium_status2 <- chrysosplenium_xlsx2[[3]]
+chrysosplenium_list2 <- c(chrysosplenium_xlsx2[[1]])
+# Here we get the NCIB uids
+uid_chrysosplenium2 <- get_uid(chrysosplenium_list2) 
+
+# this matches our NCIB ids to Open Tree of Life df
+matches_chrysosplenium2 <- tnrs_match_names(chrysosplenium_list2)
+# ott ids are Open Tree of Life Taxonomy handlers, they identify taxa (from internet)
+ott_ids_chrysosplenium2 <- matches_chrysosplenium2$ott_id
+ott_ids_chrysosplenium2 <- ott_ids_chrysosplenium2[!is.na(ott_ids_chrysosplenium2)] # remove NA's
+
+# get tree
+tree_chrysosplenium2 <- tol_induced_subtree(ott_ids = ott_ids_chrysosplenium2)
+#shorten labels
+tree_chrysosplenium2$tip.label <- tree_chrysosplenium2$tip.label %>%
+  str_remove("_ott\\d+$") %>%
+  str_replace_all("_", " ") %>%
+  sort()
+
+setdiff(tree_chrysosplenium2$tip.label, chrysosplenium_list2)
+# Excel list and tip.label from tree entries DO NOT MATCH
+########## This must be fixed so we first make a function cleaning the entries
+clean_species <- function(x) {
+  x %>%
+    tolower() %>%
+    str_replace_all("chrysosplenium\\s*", "chrysosplenium ") %>%  # ensure space after genus
+    stringi::stri_replace_all_regex("\\p{Z}+", " ") %>%
+    str_replace_all("[^a-z0-9 ]", "") %>%
+    str_squish()
+}
+# Now we apply this
+tree_chrysosplenium2$tip.label <- clean_species(tree_chrysosplenium2$tip.label)
+# Maybe turning this into df will help
+df_tip_tree <- data.frame(
+  clean = tree_chrysosplenium2$tip.label,
+  nothing = "nothing"
+)
+
+df_tip_tree <- df_tip_tree %>%
+  mutate(
+    nothing = paste0(
+      toupper(substr(clean, 1, 1)), ". ",
+      word(clean, 2)
+    )
+  )
+# For the xlsx list it is more complicated
+chrysosplenium_xlsx2 <- chrysosplenium_xlsx2 %>%
+  mutate(clean = clean_species(species))
+
+setdiff(chrysosplenium_xlsx2$clean, df_tip_tree$clean)
+# Now we make the clean df by filtering the two
+chrysosplenium_clean <- chrysosplenium_xlsx2 %>%
+  filter(clean %in% df_tip_tree$clean)
+# This still results in 1 extra entry in df_tip_tree so lets see
+setdiff(df_tip_tree$clean, chrysosplenium_xlsx2$clean)
+
+chrysosplenium_clean <- chrysosplenium_clean %>%
+  add_row(
+    species = "Chrysosplenium valdepilosum",
+    status  = "absent",
+    group   = "unrealistic species",
+    notes   = "pls werk",
+    clean   = "chrysosplenium valdepilosum"
+  )
+
+# check (should ive empty output)
+setdiff(chrysosplenium_clean[[5]], tree_chrysosplenium2$tip.label )
+
+# Now we adjust tip.tree so we get the abbreviated form
+tree_chrysosplenium2$tip.label <- df_tip_tree$nothing
+
+# NOW WE FINALLY MAKE THE GROUPS!
+chrysosplenium_groups2 <- data.frame(
+  species = tree_chrysosplenium2$tip.label,
+  group   = chrysosplenium_clean[[3]]
+  )
+
+# add manual rootedge
+tree_chrysosplenium2 <- compute.brlen(tree_chrysosplenium2, method = "Grafen")
+
+# add maximum x value so figure will nicely fit
+max_x <- max(tree_chrysosplenium2$data$x, na.rm = TRUE)
+
+chrysosplenium_tree2 <- ggtree(tree_chrysosplenium2, layout = "fan") %<+% chrysosplenium_groups2 +
+  geom_rootedge(rootedge = 0.2) +
+  geom_tiplab2(size = 5, nudge_y = 0, nudge_x = 0.1) +
+  geom_tippoint(aes(color = group), shape = 15, size = 3, position = position_nudge(x = 0.0)) +
+  scale_color_manual(values = c(
+    "non-indicator"       = "orange1",
+    "Indicator in DB"     = "green4", 
+    "unrealistic species" = "red2",
+    "Indicator not in DB" = "yellow2"
+  ))+
+  labs(
+    title = "Chrysosplenium species"
+  ) +
+  theme(
+  plot.title   = element_text(size = 22, face = "bold", hjust = 0.5, vjust = 1),
+  legend.position = c(1.01, 0.5),      
+  legend.justification = c(0, 0.5),
+  plot.margin = margin(60, 120, 10, 10),  
+  legend.text = element_text(size = 18),
+  legend.title = element_text(size = 18)
+) + 
+  xlim(-0.5, NA + 1)
+
+
+plot(chrysosplenium_tree2)
+```
+
+
+
+# Species
+This code gets all ids etc from a genus, here I used Geum as example but can be adjusted. 
+```{r, echo=FALSE}
+# STEP 1: Define your genus
+genus_name <- "Solanum"
+
+# STEP 2: Get all species names in that genus from NCBI
+# This can take some time depending on genus size
+ncbi_species <- downstream(genus_name, db = "ncbi", downto = "species")
+
+# Extract just the species names as character vector
+species_names <- ncbi_species[[1]]$childtaxa_name
+
+# Optional: Clean species names (remove NAs or synonyms)
+species_names <- species_names[!is.na(species_names)]
+
+# STEP 3: Get NCBI UIDs
+uids <- get_uid(species_names)
+
+# STEP 4: Match names to Open Tree of Life
+matches_otol <- tnrs_match_names(species_names)
+
+# STEP 5: Extract OTOL IDs (ott_ids)
+ott_ids <- matches_otol$ott_id
+
+# STEP 6: Combine results into a dataframe
+lookup <- data.frame(
+  species = species_names,
+  ncbi_uid = as.character(uids),
+  ott_id = matches_otol$ott_id,
+  matched_name_otol = matches_otol$unique_name,
+  stringsAsFactors = FALSE
+)
+
+pruned_ott_ids <- c(3942887, 5145922, 5762452, 5762454, 5762459)
+valid_ott_ids <- lookup$ott_id[!is.na(lookup$ott_id)] 
+valid_ott_ids <- setdiff(valid_ott_ids, pruned_ott_ids)
+
+
+tree <- tol_induced_subtree(ott_ids = valid_ott_ids)
+
+tree$tip.label <- tree$tip.label %>%
+  str_remove("_ott\\d+$") %>%
+  str_replace_all("_", " ") %>%
+  sort()
+tree <- compute.brlen(tree, method = "Grafen")
+
+for_x_max2 <- ggtree(tree, layout = "rectangular") +
+  geom_rootedge(rootedge = 0.2) +
+  geom_tiplab(size = 3, hjust = 0.5, vjust = 1.5, offset = 0) +
+  geom_tippoint(aes(color = group), shape = 15, size = 3, position = position_nudge(x = 0.0)) +
+  theme_tree(
+    legend.position = "right"
+  ) 
+
+max_x2 <- max(for_x_max2$data$x, na.rm = TRUE)
+
+tree_plot <- ggtree(tree, layout = "fan")  +
+  geom_rootedge(rootedge = 0.2) +
+  geom_tiplab(size = 3, hjust = 0, vjust = 0, offset = 0) +
+  theme_tree(
+    legend.position = "right"
+  ) + 
+  theme(plot.margin = margin(50, 50, 50, 50)) 
+
+plot(tree_plot)
+```
+# This section is for saving the trees in one pdf
+```{r, echo = FALSE, include = False}
+pdf("E:/Msc/Thesis/Phylotrees/multi_trees2.pdf", width = 10, height = 8)
+
+par(mfrow = c(1,2))
+
+# add trees you want to print here
+print(carex_tree)
+print(populus_tree)
+print(geranium_tree)
+print(geum_tree)
+print(quercus_tree)
+print(poa_tree)
+print(veronica_tree)
+print(chrysosplenium_tree)
+print(tilia_tree)
+print(polystichum_tree)
+#plot(crataegus_tree2)
+print(elymus_tree2)
+print(chrysosplenium_tree2)
+print(ulmus_tree)
+
+dev.off()
+```
+
+
+```{r, echo=FALSE, include=FALSE}
+#pdf("E:/Msc/Thesis/Phylotrees/carex_tree2.pdf", width = 13, height = 10)  # wide canvas to fit plot + legend
+#plot(carex_tree2)
+#dev.off()
+
+pdf("E:/Msc/Thesis/Phylotrees/chrysosplenium_tree3.pdf", width = 14, height = 16)
+plot(chrysosplenium_tree2)
+dev.off()
+
+```
+

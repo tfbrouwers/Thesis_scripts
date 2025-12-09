@@ -1,0 +1,658 @@
+---
+title: "Deamination plots"
+author: "Tom Brouwers"
+date: "2025-04-18"
+output: pdf_document
+---
+
+```{r, include=FALSE, echo=FALSE}
+library(tidyverse)
+library(purrr)
+library(ggrepel)
+library(viridis)
+library(RColorBrewer)
+```
+
+# Get data and make df's
+```{r, echo=FALSE, include=FALSE}
+df_2503 <- read_tsv("E:/Msc/Thesis/Data/Sequencing/250321_all_data_summary.tsv")
+# C:/Thesis/Data/25-03/250321_genus_summary.tsv if on home pc
+# C:/Users/hauke/Documents/SedaDNA project/Data/First Data 24-03/250321_genus_summary.tsv for laptop
+# attach genera check list
+genera_status <- read.csv('E:/Msc/Thesis/Data/Sequencing/genera status list2.csv', header = TRUE, sep = ',')
+
+sus_genera <- read.csv("E:/Msc/Thesis/R/sus_genera.csv", header = FALSE, sep = ",")
+
+# exclude irrelevant libraries, bacteria etc. 
+df_genus_2503 <- df_2503 %>%
+  filter(!library %in% c("Lib.J.1035", "Lib.J.1048", 'Lib.J.1049')) %>%
+  select(., 1, 2, 4:8, 13:15,
+         "deam5p_frac_genus", "deam3p_frac_genus",
+         "median_read_length_genus", "ancientness_genus"
+         ) %>%
+  mutate(deamination_rate = (deam5p_frac_genus + deam3p_frac_genus) / 2)  %>% #add deamination rate
+  mutate(location_layer = case_when( # here we add location for each library
+    str_detect(library, "Lib.J.1036")  ~ "ML3"  ,
+    str_detect(library, "Lib.J.1037")  ~ "ML2"  ,
+    str_detect(library, "Lib.J.1038")  ~ "ML1"  ,
+    str_detect(library, "Lib.J.1039")  ~ "W2L4" ,
+    str_detect(library, "Lib.J.1040")  ~ "W2L4" ,
+    str_detect(library, "Lib.J.1041")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1042")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1043")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1044")  ~ "W1L4" ,
+    str_detect(library, "Lib.J.1045")  ~ "W1L4" ,
+    str_detect(library, "Lib.J.1046")  ~ "W1L3_2",
+    str_detect(library, "Lib.J.1047")  ~ "W1L3_1"  
+  )) %>%
+  group_by(library, genus_name) %>%
+  slice_max(genus_count_assembly, n =1, with_ties = FALSE) %>%
+  filter(!genus_count_assembly < 100) %>%
+  ungroup() %>%
+  group_by(library)
+
+# We want to add a collumn which indicates whether genera is native, introduced or not present
+df_genus_2503 <-df_genus_2503 %>%
+  left_join(genera_status, by = 'genus_name')
+  
+df_genus_2503 <- df_genus_2503 %>%
+  mutate(status = case_when(
+    is.na(status) & family_name == 'Alatinidae'~'absent',
+    TRUE ~ status
+  ))
+df_genus_2503 <- df_genus_2503 %>%
+  mutate(genus_name = ifelse(is.na(genus_name), 'Alatinidae', genus_name)) 
+
+# needed for plotting all libraries seperatd
+libs <- unique(df_genus$library)
+locs <- unique(df_genus$location)
+
+```
+# make group lists per site and library. Also make genera list for checking bleed-over's
+```{r, echo=FALSE}
+
+# assign location groups
+group_list <- list(
+  M = c("Lib.J.1036", "Lib.J.1037", "Lib.J.1038"),
+  W1 = c("Lib.J.1044" ,"Lib.J.1045", "Lib.J.1046", "Lib.J.1047"),
+  W2 = c("Lib.J.1039", "Lib.J.1040", "Lib.J.1041", "Lib.J.1042", "Lib.J.1043")
+)
+
+
+df_genus_2503_plot <- df_genus_2503 %>%
+  mutate(library = str_remove(library, "^Lib\\.J\\."))
+
+df_genus_2504_plot <- df_genus_2504 %>%
+  mutate(library = str_remove(library, "^Lib\\.J\\.")) %>%
+  left_join(site_assign_list, site, by = "library") %>%
+  #select(!kingdom_group.x, !kingdom_group.y, !genus_label) %>%
+  filter(!library == "1044")
+
+df_genus_2504_plot_ap <- df_genus_2504_plot %>%
+  filter(kingdom_group %in% c("Plants", "Animals"))
+df_genus_2504_plot_bact <- df_genus_2504_plot %>%
+  filter(kingdom_group == "Microbes")
+
+# Group colours
+group_colours_label <- c(
+  "1036 - M" = "deepskyblue",
+  "1037 - M" = "steelblue3",
+  "1038 - M" = "royalblue4",
+  "1039 - W2" = "orange",
+  "1040 - W2" = "orangered3",
+  "1041 - W2" = "red3",
+  "1042 - W2" = "firebrick4",
+  "1043 - W2" = "violetred4",
+  "1044 - W1" = "green",
+  "1045 - W1" = 'green3',
+  "1046 - W1" = "green4",
+  "1047 - W1" = "darkolivegreen"
+  )
+
+group_colours_library <- c(
+  "1036" = "deepskyblue",
+  "1037" = "steelblue3",
+  "1038" = "royalblue4",
+  "1039" = "orange",
+  "1040" = "orangered3",
+  "1041" = "red3",
+  "1042" = "firebrick4",
+  "1043" = "violetred4",
+  "1044" = "green2",
+  "1045" = 'green3',
+  "1046" = "green4",
+  "1047" = "darkolivegreen"
+  )
+```
+# Create deamination plot all libraries together
+```{r, echo=FALSE}
+# ---------------------------------------- Microbes Plot ---------------------------------------
+deam_plot_2504_bact <- ggplot(df_genus_2504_plot_bact, aes(x = genus_count_assembly, y = genus_deam_count, color = label)) +
+  geom_point(alpha = 0.7, size = 4) + # we want a scatter plot
+  geom_smooth(method = 'lm', se = FALSE, linewidth = 1.25) + 
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+  #geom_text_repel(size = 5, max.overlaps = 20, box.padding = 0.4) + 
+  scale_x_continuous(
+    trans = 'log10',
+    limits = c(100, NA),
+    labels = scales::comma
+  ) + 
+  scale_y_continuous(
+    trans = "log10",
+    limits = c(NA,NA),
+    labels = scales::comma
+  ) + 
+  labs(
+    title = 'b',
+    x = 'genus_count_assembly',
+    y = 'genus_deam_count',
+    color = 'Library'
+  ) +
+  scale_colour_manual(values = group_colours_label) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.title.y   = element_blank(),
+    axis.title.x = element_text(size = 20),
+    legend.text  = element_text(size = 24),
+    legend.title = element_text(size = 24),
+    legend.position = c(0.95, 0.05),    # near bottom-right inside plot
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = alpha("white", 0.6), color = NA) # optional translucent box
+    #legend.position = "none"
+  )
+
+deam_plot_2504_bact
+
+ggsave("E:/Msc/Thesis/Data/Plots/Deamination/report_Deamination_plot_2504_bact.jpg", plot = deam_plot_2504_bact, width = 30, height = 25, units = "cm", dpi = 300)
+
+# --------------------------------------------------- Plants & Animals -----------------------------------------------------------
+deam_plot_2504_ap <- ggplot(df_genus_2504_plot_ap, aes(x = genus_count_assembly, y = genus_deam_count, color = label)) +
+  geom_point(alpha = 0.7, size = 4) + # we want a scatter plot
+  geom_smooth(method = 'lm', se = FALSE, linewidth = 1.25) + 
+  geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+  #geom_text_repel(size = 5, max.overlaps = 20, box.padding = 0.4) + 
+  scale_x_continuous(
+    trans = 'log10',
+    limits = c(100, NA),
+    labels = scales::comma
+  ) + 
+  scale_y_continuous(
+    trans = "log10",
+    limits = c(NA,NA),
+    labels = scales::comma
+  ) + 
+  labs(
+    title = 'a',
+    x = 'genus_count_assembly',
+    y = 'genus_deam_count',
+    color = 'Library'
+  ) +
+  scale_colour_manual(values = group_colours_label) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.title   = element_text(size = 20),
+    legend.text  = element_text(size = 20),
+    #legend.title = element_text(size = 20),
+    #legend.position = c(0.95, 0.05),    # near bottom-right inside plot
+    #legend.justification = c("right", "bottom"),
+    #legend.background = element_rect(fill = alpha("white", 0.6), color = NA) # optional translucent box
+    legend.position = "none"
+  )
+
+deam_plot_2504_ap
+
+
+ggsave("E:/Msc/Thesis/Data/Plots/Deamination/report_Deamination_plot_2504_ap.jpg", plot = deam_plot_2504_ap, width = 30, height = 25, units = "cm", dpi = 300)
+```
+
+# Plot each library seperate and export to pdf
+```{r, echo=FALSE}
+y_max_global <- max(df_genus_2504_plot$genus_deam_count, na.rm = TRUE)
+x_max_global <- max(df_genus_2504_plot$genus_count_assembly, na.rm = TRUE)
+
+plot_list <- map(libs, function(lib) {
+  df_subset <- df_genus_2504_plot %>%
+    filter(library == lib)
+
+  # skip if no data
+  if (nrow(df_subset) == 0) return(NULL)
+
+  # max y for scaling
+  ymax <- max(df_subset$genus_deam_count, na.rm = TRUE)
+  # fallback ymax if result is not finite
+  if (!is.finite(ymax) || is.na(ymax)) {
+    ymax <- 10
+  }
+
+  ggplot(df_subset, aes(x = genus_count_assembly, y = genus_deam_count, colour = library, label = genus_name)) +
+    geom_point(alpha = 0.7, size = 2) +
+    geom_smooth(method = 'lm', se = FALSE, linewidth = 0.75) + 
+    geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+    geom_text_repel(size = 3, max.overlaps = Inf, box.padding = 0.4, force = 2) +
+    scale_x_continuous(
+      trans = 'log10',
+      limits = c(100, x_max_global)
+    ) +
+    scale_y_continuous(
+      trans = "log10",
+      limits = c(0.1, y_max_global)
+    ) +
+    labs(
+      title = paste('Deamination count vs Genus read count -', lib),
+      x = 'Read count',
+      y = 'Deamination count',
+      colour = 'Library'
+    ) +
+      scale_colour_manual(values = group_colours
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title   = element_text(size = 18, hjust = 0.5),
+    axis.text    = element_text(size = 14),
+    axis.title   = element_text(size = 14),
+    legend.text  = element_text(size = 16),
+    legend.title = element_text(size = 16)
+  )
+})
+
+# get rid of empty plots
+plot_list <- compact(plot_list)
+names(plot_list) <- genera_in_all_libraries[seq_along(plot_list)]
+
+# save pdf
+pdf('E:/Msc/Thesis/Data/Plots/Deamination/report_Deamination_plots_libraries_2504.pdf', width = 14, height = 12)
+walk(plot_list, print)
+dev.off()
+
+```
+# Again all libs seperate
+```{r, echo=FALSE}
+y_max_global2 <- max(df_genera_uni$deamination_rate, na.rm = TRUE)
+x_max_global2 <- max(df_genera_uni$genus_count_assembly, na.rm = TRUE)
+
+plot_list <- map(libs, function(lib) {
+  df_genera_uni %>%
+    filter(library == lib) %>%
+    ggplot(aes(x = genus_count_assembly, y = deamination_rate, label = genus_name, color = library)) +
+    geom_point(alpha = 0.7, size = 2) + # scatter plot
+    geom_text_repel(size = 5, max.overlaps = 20, box.padding = 0.4) +
+   #geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') + #1:1 trend line
+    geom_smooth(method = 'lm', se = FALSE, linewidth = 0.75) +
+    scale_x_continuous(
+      trans = "log10",
+      limits = c(100, x_max_global2)
+    ) +
+    scale_y_continuous(
+      limits= c(0,y_max_global2),
+      )+
+    scale_color_manual( values = group_colours
+    ) +
+    labs(
+      title = paste('Deamination rate vs Genus read count -', lib),
+      x = 'Genus read count',
+      y = 'Deamination rate'
+    ) + 
+    theme_minimal() +
+     theme(
+    plot.title   = element_text(size = 16, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 12),
+    axis.title   = element_text(size = 12),
+    legend.text  = element_text(size = 14),
+    legend.title = element_text(size = 14)
+  )
+
+  })
+
+# give list names of library
+names(plot_list) <- libs
+
+# save each library in pdf file
+pdf('F:/Msc/Thesis/Data/Plots/Deamination/Deamination_rate_universal_genera.pdf', width = 12, height= 8)
+walk(plot_list, print)
+dev.off()
+
+
+```
+# ------------------------------------------------------------------- Deamination Rate -------------------------------------------
+
+## Deamination Rate Plot each library seperate and export to pdf
+```{r, echo=FALSE}
+df_genus_2504_plot <- df_genus_2504_plot %>%
+  filter(!is.na(kingdom_group))
+
+y_max_global <- max(df_genus_2504_plot$deamination_rate, na.rm = TRUE)
+x_max_global <- max(df_genus_2504_plot$genus_count_assembly, na.rm = TRUE)
+
+plot_list <- map(libs, function(lib) {
+  df_subset <- df_genus_2504_plot %>%
+    filter(library == lib)
+
+  # skip if no data
+  if (nrow(df_subset) == 0) return(NULL)
+
+  # max y for scaling
+  ymax <- max(df_subset$genus_deam_count, na.rm = TRUE)
+  # fallback ymax if result is not finite
+  if (!is.finite(ymax) || is.na(ymax)) {
+    ymax <- 10
+  }
+
+  ggplot(df_subset, aes(x = genus_count_assembly, y = deamination_rate, colour = kingdom_group)) +
+    geom_point(alpha = 0.7, size = 5) +
+    geom_smooth(method = 'lm', se = FALSE, linewidth = 1.25) + 
+    #geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+    #geom_text_repel(size = 3, max.overlaps = Inf, box.padding = 0.4, force = 2) +
+    scale_x_continuous(
+      trans = 'log10',
+      limits = c(100, x_max_global),
+      labels = scales::comma
+    ) +
+    scale_y_continuous(
+      #trans = "log10",
+      limits = c(0, 0.3)
+    ) +
+    labs(
+      title = paste(lib),
+      x = 'genus_count_assembly',
+      y = 'deam_rate',
+      colour = 'Kingdom'
+    ) +
+      scale_colour_manual(values = c(
+    "Animals"  = "darkgoldenrod1",
+    "Plants"   = "forestgreen",
+    "Microbes" = "darkviolet"
+      )) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22),
+    axis.title   = element_text(size = 22),
+    legend.text  = element_text(size = 24),
+    legend.title = element_text(size = 24)
+  )
+})
+
+# get rid of empty plots
+plot_list <- compact(plot_list)
+names(plot_list) <- genera_in_all_libraries[seq_along(plot_list)]
+
+# save pdf
+pdf('E:/Msc/Thesis/Data/Plots/Deamination/TESTreport_Deamination_Rate_plots_libraries_2504.pdf', width = 14, height = 11)
+walk(plot_list, print)
+dev.off()
+
+```
+### Deamination Rate kingdoms only lib 1045
+```{r, echo=FALSE}
+deam_rate_1045 <- df_genus_2504_plot %>%
+  filter(library == "1045")
+
+
+deam_rate_plot_1045 <- ggplot(deam_rate_1045, aes(x = genus_count_assembly, y = deamination_rate, colour = kingdom_group)) +
+  geom_point(alpha = 0.7, size = 4) + # we want a scatter plot
+  geom_smooth(method = 'lm', se = FALSE, linewidth = 1.50) + 
+  #geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+  #geom_text_repel(size = 5, max.overlaps = 20, box.padding = 0.4) + 
+  scale_x_continuous(
+    trans = 'log10',
+    limits = c(100, NA),
+    labels = scales::comma
+  ) + 
+  scale_y_continuous(
+    #trans = "log10",
+    limits = c(0,0.3),
+    labels = scales::comma
+  ) + 
+  labs(
+    title = 'a',
+    subtitle = "Deamination Rates Library 1045",
+    x = 'genus_count_assembly',
+    y = 'deam_rate',
+    color = 'Kingdom'
+  ) +
+  scale_colour_manual(values = c(
+    "Animals"  = "darkgoldenrod1",
+    "Plants"   = "forestgreen",
+    "Microbes" = "darkviolet"
+      )) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold"),
+    plot.subtitle = element_text(size = 22, hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.title.y = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    legend.text  = element_text(size = 24),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 24, hjust = 0.5),
+    legend.position = c(0.98, 0.07),    # near bottom-right inside plot
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = alpha("white", 0.8), color = NA) # optional translucent box
+    #legend.position = "none"
+  )
+
+ggsave("E:/Msc/Thesis/Data/Plots/Deamination/report_Deamination_Rate_plot_1045.jpg", plot = deam_rate_plot_1045, width = 30, height = 25, units = "cm", dpi = 300)
+
+```
+
+## Deamination Rate Analysis for intra site variance
+
+```{r, echo=FALSE}
+# remove bleed-over taxa and poor performing lib 1044
+df_genus_2503 <- df_genus_2503 %>%
+  #filter(!library == "Lib.J.1044") %>%
+  filter(!status %in% c("absent", "introduced"))
+
+
+# this section is for sorting which genera are present in a Libs
+genus_per_library <- df_genus_2503 %>%
+  group_by(library) %>%
+  summarise(unique_genera = n_distinct(genus_name))
+# genera present in all libs
+genera_in_all_libraries <- df_genus_2503 %>%
+  distinct(genus_name, library) %>%     
+  group_by(genus_name) %>%               
+  summarise(library_count = n()) %>%    
+  filter(library_count == n_distinct(df_genus_2503$library)) %>%  
+  pull(genus_name)          
+# df universal genera
+df_genera_uni <-  df_genus_2503 %>%
+  filter(genus_name %in% genera_in_all_libraries) 
+# remove Lib.J. part so it fits with colours
+df_genera_uni <- df_genera_uni %>%  
+  left_join(site_assign_list, site, by = "library") %>%
+  mutate(library = str_remove(library, "^Lib\\.J\\.")) %>%
+  filter(!library == "1044") 
+
+
+# maken df's per site
+df_gen_uni_W2 <- df_genera_uni %>%
+  filter(site == "W2")
+
+df_gen_uni_W1 <- df_genera_uni %>%
+  filter(site == "W1")
+
+df_gen_uni_M <- df_genera_uni %>%
+  filter(site == "M")
+
+```
+
+
+# Deamination rate plot universal genera per site
+```{r, echo=FALSE}
+# _____________________________ MOEHNE ____________________________________________________________-
+deam_rate_M <- ggplot(df_gen_uni_M, aes(x = genus_count_assembly, y = deamination_rate, color = library, label = genus_name)) +
+  geom_point(alpha = 0.7, size = 4) + # we want a scatter plot
+  geom_smooth(method = 'lm', se = FALSE, linewidth = 1.50) + 
+  #geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+  geom_text_repel(size = 8, max.overlaps = 20, box.padding = 0.4) + 
+  scale_x_continuous(
+    trans = 'log10',
+    limits = c(100, NA),
+    labels = scales::comma
+  ) + 
+  scale_y_continuous(
+    #trans = "log10",
+    limits = c(0,0.3),
+    labels = scales::comma
+  ) + 
+  labs(
+    title = 'b',
+    subtitle = "Deamination Rates Universal Genera - Moehne",
+    x = 'genus_count_assembly',
+    y = 'deam_rate',
+    color = 'Library'
+  ) +
+  scale_colour_manual(values = group_colours_library
+      ) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold"),
+    plot.subtitle = element_text(size = 22, hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.title.y = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    legend.text  = element_text(size = 24),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 24, hjust = 0.5),
+    legend.position = c(0.98, 0.07),    # near bottom-right inside plot
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = alpha("white", 0.8), color = NA) # optional translucent box
+    #legend.position = "none"
+  )
+
+deam_rate_M
+#------------------------------------------------------------------- Deeamination Rate Universal GEnera W1 ----------------------------------------------------------
+deam_rate_W1 <- ggplot(df_gen_uni_W1, aes(x = genus_count_assembly, y = deamination_rate, color = library, label = genus_name)) +
+  geom_point(alpha = 0.7, size = 4) + # we want a scatter plot
+  geom_smooth(method = 'lm', se = FALSE, linewidth = 1.50) + 
+  #geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+  geom_text_repel(size = 8, max.overlaps = 20, box.padding = 0.4) + 
+  scale_x_continuous(
+    trans = 'log10',
+    limits = c(100, NA),
+    labels = scales::comma
+  ) + 
+  scale_y_continuous(
+    #trans = "log10",
+    limits = c(0,0.3),
+    labels = scales::comma
+  ) + 
+  labs(
+    title = 'c',
+    subtitle = "Deamination Rates Universal Genera - Wester 1",
+    x = 'genus_count_assembly',
+    y = 'deam_rate',
+    color = 'Library'
+  ) +
+  scale_colour_manual(values = group_colours_library
+      ) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold"),
+    plot.subtitle = element_text(size = 22, hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.title.y = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    legend.text  = element_text(size = 24),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 24, hjust = 0.5),
+    legend.position = c(0.98, 0.07),    # near bottom-right inside plot
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = alpha("white", 0.8), color = NA) # optional translucent box
+    #legend.position = "none"
+  )
+
+deam_rate_W1
+
+#------------------------------------------------------ Deamination Rate Universal Genera W2 ---------------------------------------------------------
+deam_rate_W2 <- ggplot(df_gen_uni_W2, aes(x = genus_count_assembly, y = deamination_rate, color = library, label = genus_name)) +
+  geom_point(alpha = 0.7, size = 4) + # we want a scatter plot
+  geom_smooth(method = 'lm', se = FALSE, linewidth = 1.50) + 
+  #geom_abline(intercept = 0, slope = 1, linetype = 'dashed', color = 'black') +
+  geom_text_repel(size = 8, max.overlaps = 20, box.padding = 0.4) + 
+  scale_x_continuous(
+    trans = 'log10',
+    limits = c(100, NA),
+    labels = scales::comma
+  ) + 
+  scale_y_continuous(
+    #trans = "log10",
+    limits = c(0,0.3),
+    labels = scales::comma
+  ) + 
+  labs(
+    title = 'd',
+    subtitle = "Deamination Rates Universal Genera - Moehne",
+    x = 'genus_count_assembly',
+    y = 'deam_rate',
+    color = 'Library'
+  ) +
+  scale_colour_manual(values = group_colours_library
+      ) +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold"),
+    plot.subtitle = element_text(size = 22, hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.title.y = element_text(size = 20),
+    axis.title.x = element_text(size = 20),
+    legend.text  = element_text(size = 24),
+    legend.spacing = unit(4, "cm"),
+    legend.title = element_text(size = 24, hjust = 0.5),
+    legend.position = c(0.98, 0.001),    # near bottom-right inside plot
+    legend.justification = c("right", "bottom"),
+    legend.background = element_rect(fill = alpha("white", 0.8), color = NA) # optional translucent box
+    #legend.position = "none"
+  )
+
+deam_rate_W2
+#------------------------------- SAVE PLOTS _______________________________________________________
+ggsave("E:/Msc/Thesis/Data/Plots/Deamination/report_Deam_Rate_UNI_plot_M.jpg", plot = deam_rate_M, width = 30, height = 25, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Deamination/report_Deam_Rate_UNI_plot_W1.jpg", plot = deam_rate_W1, width = 30, height = 25, units = "cm", dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/Deamination/report_Deam_Rate_UNI_plot_W2.jpg", plot = deam_rate_W2, width = 30, height = 25, units = "cm", dpi = 300)
+```
+
+
+
+
+# Here plot per sampling location
+```{r, echo=FALSE}
+plot_group_list <- imap(group_list, function(libs_in_group, group_name) {
+  df_genera_uni %>%
+    filter(library %in% libs_in_group) %>%
+    ggplot(aes(x = genus_count_assembly, y = deamination_rate, label = genus_name, color = library)) +
+    geom_point(alpha = 0.7, size = 2) +
+    geom_text_repel(size = 5, max.overlaps = 20, box.padding = 0.4) +
+    geom_smooth(method = 'lm', se = FALSE, linewidth = 0.75) +
+    scale_x_continuous(
+      trans = "log10",
+      limits = c(100, x_max_global2)
+    ) +
+    scale_y_continuous(
+      limits= c(0, y_max_global2)
+    ) +
+    scale_color_manual(values = group_colours ) +
+    labs(
+      title = paste('Deamination rate vs Genus read count -', group_name),
+      x = 'Genus read count',
+      y = 'Deamination rate'
+    ) + 
+    theme_minimal() +
+    theme(
+      plot.title   = element_text(size = 16, face = "bold", hjust = 0.5),
+      axis.text    = element_text(size = 12),
+      axis.title   = element_text(size = 12),
+      legend.text  = element_text(size = 14),
+      legend.title = element_text(size = 14)
+    )
+})
+
+
+names(plot_group_list) <- names(group_list)
+
+pdf('E:/Msc/Thesis/Data/Plots/Deamination/Deamination_rate_universal_genera_GROUPED.pdf', width = 12, height= 8)
+walk(plot_group_list, print)
+dev.off()
+
+```
+
+
+

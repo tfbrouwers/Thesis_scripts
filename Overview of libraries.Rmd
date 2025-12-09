@@ -1,0 +1,482 @@
+---
+title: "overview"
+author: "Tom Brouwers"
+date: "2025-08-22"
+output: pdf_document
+---
+
+```{r, include=FALSE, echo=FALSE}
+library(tidyverse)
+library(purrr)
+library(ggrepel)
+library(viridis)
+library(RColorBrewer)
+library(cowplot)
+```
+This script serves to create df's based on kingdom (plant, animal, microbe) so we can create overview barcharts which will show how much data we have. 
+
+#df_genus
+
+first we create the big df_genus with all kingdoms on genus level from the raw df Kevin send. We exclude libraries 1035 (control), 1048 and 1049 (both other site). WE only keep certain columns, mostly to keep things tidy. 
+We add which layer the libraries were sampled from 
+we collapse to genus level (raw data can have f.e. 3 taxa per genus) and keep the counts of taxa with highest reads
+We delete entries which are below threshold of 10 reads. 
+Then add genera_check_list. I checked most genera (mainly plants) on whether they occur in our context (germany) and gave them 'status' which is native, introduced or absent. A lot of NA's in this column because new versions of the data kept getting added and I didn't keep up with checking. Also microbes are not te be checked because this is far too complicated. 
+Finally I added another column 'kingdom_name' where I roughly divide entries into animals, plants and microbes. THis will be usefull for plotting
+```{r, echo=FALSE}
+############################ creating df_genus ###########################################
+df <- read_tsv("E:/Msc/Thesis/Data/Sequencing/250627_taxon_out.tsv")
+df_genus <- df %>%
+  filter(!library %in% c("Lib.J.1035", "Lib.J.1048", 'Lib.J.1049')) %>%
+  select(., 1, 2, 5:9, 15:17,
+         "deam5p_frac_genus", "deam3p_frac_genus",
+         "median_read_length_genus", "ancientness_genus"
+         ) %>%
+  mutate(deamination_rate = (deam5p_frac_genus + deam3p_frac_genus) / 2)  %>% #add deamination rate
+  mutate(location_layer = case_when( # here we add location for each library
+    str_detect(library, "Lib.J.1036")  ~ "ML3"  ,
+    str_detect(library, "Lib.J.1037")  ~ "ML2"  ,
+    str_detect(library, "Lib.J.1038")  ~ "ML1"  ,
+    str_detect(library, "Lib.J.1039")  ~ "W2L4" ,
+    str_detect(library, "Lib.J.1040")  ~ "W2L4" ,
+    str_detect(library, "Lib.J.1041")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1042")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1043")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1044")  ~ "W1L4" ,
+    str_detect(library, "Lib.J.1045")  ~ "W1L4" ,
+    str_detect(library, "Lib.J.1046")  ~ "W1L3_2",
+    str_detect(library, "Lib.J.1047")  ~ "W1L3_1"  
+  )) %>%
+  group_by(library, genus_name) %>%
+  slice_max(genus_count_assembly, n =1, with_ties = FALSE) %>%
+  filter(!genus_count_assembly < 10) %>%
+  ungroup() %>%
+  group_by(library)
+
+# We want to add a collumn which indicates whether genera is native, introduced or not present
+df_genus <-df_genus %>%
+  left_join(genera_status, by = 'genus_name')
+  
+df_genus <- df_genus %>%
+  mutate(status = case_when(
+    is.na(status) & family_name == 'Alatinidae'~'absent',
+    TRUE ~ status
+  ))
+df_genus <- df_genus %>%
+  mutate(genus_label = ifelse(is.na(genus_name), 'Alatinidae', genus_name))
+
+# Create tibble for kingdom_name ##
+phylum_groups <- tribble(
+  ~phylum_name,           ~kingdom_group,
+  # plants
+  "Streptophyta",         "Plants",
+  "Chlorophyta",          "Plants",
+  "Rhodophyta",           "Plants",
+  
+  # animals
+  "Chordata",             "Animals",
+  "Arthropoda",           "Animals",
+  "Annelida",             "Animals",
+  "Mollusca",             "Animals",
+  "Platyhelminthes",      "Animals",
+  "Nematoda",             "Animals",
+  
+  # microbes 
+  "Acidobacteriota",      "Microbes",
+  "Actinomycetota",       "Microbes",
+  "Aquificota",           "Microbes",
+  "Armatimonadota",       "Microbes",
+  "Bacillota",            "Microbes",
+  "Balneolota",           "Microbes",
+  "Bdellovibrionota",     "Microbes",
+  "Campylobacterota",     "Microbes",
+  "Chlamydiota",          "Microbes",
+  "Chlorobiota",          "Microbes",
+  "Chloroflexota",        "Microbes",
+  "Cyanobacteriota",      "Microbes",
+  "Deferribacterota",     "Microbes",
+  "Deinococcota",         "Microbes",
+  "Fibrobacterota",       "Microbes",
+  "Gemmatimonadota",      "Microbes",
+  "Ignavibacteriota",     "Microbes",
+  "Kiritimatiellota",     "Microbes",
+  "Lentisphaerota",       "Microbes",
+  "Mycoplasmatota",       "Microbes",
+  "Myxococcota",          "Microbes",
+  "Nitrospinota",         "Microbes",
+  "Nitrospirota",         "Microbes",
+  "Planctomycetota",      "Microbes",
+  "Pseudomonadota",       "Microbes",
+  "Rhodothermota",        "Microbes",
+  "Spirochaetota",        "Microbes",
+  "Synergistota",         "Microbes",
+  "Thermodesulfobacteriota","Microbes",
+  "Thermomicrobiota",     "Microbes",
+  "Thermotogota",         "Microbes",
+  "Verrucomicrobiota",    "Microbes",
+  "Fusobacteriota",       "Microbes",
+  "Calditrichota",        "Microbes",
+  "Chrysiogenota",        "Microbes",
+  "Vulcanimicrobiota",    "Microbes",
+  "Elusimicrobiota",      "Microbes"
+)
+
+# --------------------------------------------- library to site assign list ---------------------------------------------------
+site_assign_list <- tribble(
+  ~library, ~site, ~label,
+  "1036", "M", "1036 - M",
+  "1037", "M", "1037 - M",
+  "1038", "M", "1038 - M",
+  "1039", "W2", "1039 - W2",
+  "1040", "W2", "1040 - W2",
+  "1041", "W2", "1041 - W2",
+  "1042", "W2", "1042 - W2",
+  "1043", "W2", "1043 - W2",
+  "1044", "W1", "1044 - W1",
+  "1045", "W1", "1045 - W1",
+  "1046", "W1", "1046 - W1",
+  "1047", "W1", "1047 - W1" 
+)
+
+df_genus <- df_genus %>%
+  left_join(phylum_groups, by = "phylum_name")
+
+
+# remove bleed-over taxa from main df
+df_genus <- df_genus %>%
+  filter(!status %in% c('absent', "introduced") ) %>%
+  group_by(library) %>%
+  mutate(total_sum_genus_count = sum(sum_genus_count))
+
+# keep bleed-over for overview figures
+df_genus_dirty <- df_genus
+
+# make new df to calculate relative contribution to genus_count_assembly per kingdom
+df_DNA_contribution <- df_genus %>%
+  group_by(library, kingdom_group) %>%
+  summarise(
+    total_reads = sum(genus_count_assembly, na.rm = TRUE),
+    .groups = "drop_last"
+  ) %>%
+  mutate(
+    library_total = sum(total_reads),                 # total per library
+    rel_contribution = total_reads / library_total    # relative contribution
+  ) %>%
+  ungroup()
+
+write.csv(unique(df_bacteria$genus_name), file = "E:/Msc/Thesis/Data/Bacteria/bacteria_genera_list.csv")
+
+```
+
+# same procedure for old databases25-03 and 25-04  to check differences. 
+```{r, echo=FALSE}
+# ---------------------------------- 2504 -----------------------------------------
+df_2504 <- read_tsv("E:/Msc/Thesis/Data/Sequencing/beaver_250424_raw_taxonomy_data.tsv")
+df_genus_2504 <- df_2504 %>%
+  filter(!library %in% c("Lib.J.1035", "Lib.J.1048", 'Lib.J.1049')) %>%
+  select(., 1, 2, 7:11, 17:19,
+         "deam5p_frac_genus", "deam3p_frac_genus",
+         "median_read_length_genus", "ancientness_genus"
+         ) %>%
+  mutate(deamination_rate = (deam5p_frac_genus + deam3p_frac_genus) / 2)  %>% #add deamination rate
+  mutate(location_layer = case_when( # here we add location for each library
+    str_detect(library, "Lib.J.1036")  ~ "ML3"  ,
+    str_detect(library, "Lib.J.1037")  ~ "ML2"  ,
+    str_detect(library, "Lib.J.1038")  ~ "ML1"  ,
+    str_detect(library, "Lib.J.1039")  ~ "W2L4" ,
+    str_detect(library, "Lib.J.1040")  ~ "W2L4" ,
+    str_detect(library, "Lib.J.1041")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1042")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1043")  ~ "W2L3" ,
+    str_detect(library, "Lib.J.1044")  ~ "W1L4" ,
+    str_detect(library, "Lib.J.1045")  ~ "W1L4" ,
+    str_detect(library, "Lib.J.1046")  ~ "W1L3_2",
+    str_detect(library, "Lib.J.1047")  ~ "W1L3_1"  
+  )) %>%
+  group_by(library, genus_name) %>%
+  slice_max(genus_count_assembly, n =1, with_ties = FALSE) %>%
+  filter(!genus_count_assembly < 100) %>%
+  ungroup() %>%
+  group_by(library)
+
+# We want to add a collumn which indicates whether genera is native, introduced or not present
+df_genus_2504 <-df_genus_2504 %>%
+  left_join(genera_status, by = 'genus_name')
+  
+df_genus_2504 <- df_genus_2504 %>%
+  mutate(status = case_when(
+    is.na(status) & family_name == 'Alatinidae'~'absent',
+    TRUE ~ status
+  ))
+df_genus_2504 <- df_genus_2504 %>%
+  mutate(genus_label = ifelse(is.na(genus_name), 'Alatinidae', genus_name))
+
+df_genus_2504 <- df_genus_2504 %>%
+  left_join(phylum_groups, by = "phylum_name") %>%
+  group_by(library) %>%
+  mutate(total_sum_genus_count = sum(sum_genus_count)) %>%
+  mutate(total_genus_count = sum(genus_count_assembly))  %>%
+  mutate(library = str_remove(library, "^Lib\\.J\\.")) %>%
+  left_join(site_assign_list2, site, by = "library")
+# ---------------------------------- other stuff -----------------------
+df_genus_2504_native <- df_genus_2504 %>%
+  mutate(status = if_else(is.na(status), "check", status),
+         `bleed-over` = case_when(
+      status %in% c("check", "native")      ~ "no",
+      status %in% c("absent", "introduced") ~ "yes",
+      TRUE                                   ~ NA_character_
+    ))%>%
+  group_by(library, kingdom_group, `bleed-over`) %>%
+  summarise(total_genus_count = sum(genus_count_assembly, na.rm = TRUE), .groups = "drop") %>%
+  drop_na(kingdom_group) %>%
+  pivot_wider(
+    names_from = `bleed-over`,
+    values_from = total_genus_count,
+    values_fill = 0,
+    names_prefix = "bleed_over_"
+  ) %>%
+  # compute visible bleed, total bleed (double), and adjusted non-bleed (subtract added invisible part)
+  mutate(
+    visible_bleed = coalesce(bleed_over_yes, 0),
+    non_bleed_observed = coalesce(bleed_over_no, 0),
+    total_bleed = 2 * visible_bleed,                         # assume invisible == visible
+    # subtract the added invisible fraction (== visible_bleed) from observed non-bleed
+    adjusted_non_bleed = pmax(non_bleed_observed - visible_bleed, 0)
+  )
+
+# Now roll up per-library into the four categories you requested:
+library_summary <- df_genus_2504_native %>%
+  # make a helper lowercase kingdom column for robust matching
+  mutate(kg_l = str_to_lower(kingdom_group)) %>%
+  group_by(library) %>%
+  summarise(
+    # sum adjusted non-bleed reads for groups matched by keyword
+    plant_reads  = sum(adjusted_non_bleed[str_detect(kg_l, "plant")], na.rm = TRUE),
+    animal_reads = sum(adjusted_non_bleed[str_detect(kg_l, "animal")], na.rm = TRUE),
+    microbe_reads = sum(adjusted_non_bleed[str_detect(kg_l, "micro")], na.rm = TRUE),
+    # bleed-over is summed across kingdom groups (use total_bleed because we doubled)
+    bleed_reads = sum(total_bleed, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  # total reads after adjustment (non-bleed adjusted + total bleed)
+  mutate(
+    total_reads = plant_reads + animal_reads + microbe_reads  + bleed_reads,
+    prop_plant = ifelse(total_reads > 0, plant_reads / total_reads, NA_real_),
+    prop_animal = ifelse(total_reads > 0, animal_reads / total_reads, NA_real_),
+    prop_microbe = ifelse(total_reads > 0, microbe_reads / total_reads, NA_real_),
+    prop_bleed = ifelse(total_reads > 0, bleed_reads / total_reads, NA_real_)
+  )
+
+df_DNA_contribution_2504 <- library_summary %>%
+  pivot_longer(
+    cols = starts_with("prop_"),
+    names_to = "kingdom_group",
+    values_to = "rel_contribution"
+  ) %>%
+  # map prop_* names to display labels (including bleed-over)
+  mutate(
+    kingdom_group = recode(
+      kingdom_group,
+      prop_animal = "Animals",
+      prop_plant  = "Plants",
+      prop_microbe = "Microbes",
+      prop_bleed  = "Bleed-over"
+    ),
+    # ensure library is a factor so x-ordering & free_x faceting behave
+    library = factor(library, levels = unique(library)),
+    # replace any NA proportions with 0 so stacked bars sum neatly
+    rel_contribution = coalesce(rel_contribution, 0)
+  ) %>%
+  left_join(site_assign_list, site, by = "library") %>%
+  ungroup()
+
+contribution_summary <- df_DNA_contribution_2504 %>%
+  select(library, kingdom_group, site, rel_contribution)
+
+writexl::write_xlsx(contribution_summary, path = "E:/Msc/Thesis/Data/contribution_summary.xlsx")
+
+
+
+df_genus_2504_sumking <- df_genus_2504 %>%
+  group_by(site, kingdom_group) %>%
+  summarise(n_unique_genera = n_distinct(genus_name)) 
+
+df_genus_2504_sumsite <- df_genus_2504 %>%
+  group_by(site) %>%
+  summarise(total_unique_genera = n_distinct(genus_name))
+```
+
+from df_genus_xx  we will make a summary of amount of genera per kingdom and amount of bleedovers for plotting bar charts
+```{r, echo=FALSE}
+df_summary <- df_genus_2504 %>%
+  group_by(library) %>%
+  summarise(
+    n_unique_genera = n_distinct(genus_name),
+    n_animal  = n_distinct(genus_name[kingdom_group == "Animals"]),
+    n_plant   = n_distinct(genus_name[kingdom_group == "Plants"]),
+    n_microbe = n_distinct(genus_name[kingdom_group == "Microbes"]),
+    n_absent  = n_distinct(genus_name[status %in% c("absent", "introduced")] ),
+    .groups = "drop"
+  )
+
+```
+# Plotting
+Now we want to make stacked bar charts so we show how many genera there are per library and we also want a seperate bar showing the number of bleed-overs.
+For this we make seperate df's which we'll later join and they have to be pivotted longer for pltoting
+
+```{r, echo=FALSE}
+# for the stacked bar
+df_stack <- df_summary %>%
+  select(library, n_animal, n_plant, n_microbe) %>%
+  pivot_longer(
+    cols = c(n_animal, n_plant, n_microbe),
+    names_to = "kingdom_group",
+    values_to = "n_genera"
+  ) %>%
+  mutate(
+    bar_type = "stack",
+    kingdom_group = recode(kingdom_group,
+                           n_animal = "Animals",
+                           n_plant = "Plants",
+                           n_microbe = "Microbes")
+  )
+# for the bleed-over bar
+df_bleed <- df_summary %>%
+  select(library, n_absent) %>%
+  mutate(
+    bar_type = "Bleed-over",
+    kingdom_group = "Bleed-over",
+    n_genera = n_absent
+  ) %>%
+  select(library, kingdom_group, n_genera, bar_type)
+
+# Join
+df_plot <- bind_rows(df_stack, df_bleed)
+
+# need these to do seperate bar plotting, so make double version
+df_stack2 <- df_stack %>%
+  mutate(bar_type = "Present")
+
+df_bleed2 <- df_bleed %>%
+  mutate(kingdom_group = "Bleed-over",
+         bar_type = "Bleed-over")
+
+df_plot <- bind_rows(df_stack2, df_bleed2) 
+
+```
+
+Now for the actual plots
+```{r, echo=FALSE}
+# Keep library as factor
+df_plot$library <- factor(df_plot$library, levels = unique(df_summary$library))
+
+df_plot <- df_plot %>%
+  mutate(library = str_remove(library, "^Lib\\.J\\.")) %>%
+  left_join(site_assign_list, site, by = "library")
+
+df_DNA_contribution_2504 <- df_DNA_contribution_2504 %>%
+  drop_na()
+df_plot <- df_plot %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+# Plot with legend including Absent
+overview2504 <- ggplot(df_plot, aes(x = library, y = n_genera, fill = kingdom_group)) +
+  geom_bar(data = subset(df_plot, bar_type == "Present"),
+           stat = "identity",
+           width = 0.6) +
+  geom_bar(data = subset(df_plot, bar_type == "Bleed-over"),
+           stat = "identity",
+           position = position_nudge(x = 0.3),
+           width = 0.30) +
+  facet_grid(. ~site, scales = "free_x", space = "free_x") +
+  scale_fill_manual(values = c(
+    "Animals"  = "darkgoldenrod1",
+    "Plants"   = "forestgreen",
+    "Microbes" = "darkviolet",
+    "Bleed-over"   = "red"
+  )) +
+  labs(x = "Library", y = "Number of unique genera", fill = " ", title = "b") +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title   = element_text(size = 22),
+    legend.text  = element_text(size = 26),
+    legend.title = element_text(size = 26,),
+    strip.text = element_text(size = 24, face = "bold"),
+    legend.position = "none"
+    )
+
+# also plot for relative contributions to genus_count_assembly reads per kingdom 
+df_DNA_contribution_2504 <- df_DNA_contribution_2504 %>%
+  mutate(site = fct_relevel(site, "W2", "W1", "M"))
+
+contribution2504 <- ggplot(df_DNA_contribution_2504, aes(x = library, y = rel_contribution, fill = kingdom_group)) +
+  geom_col(position = "stack",
+           width = 0.6) +
+  facet_grid(. ~site, scales = "free_x", space = "free_x") +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = c(
+    "Animals"  = "darkgoldenrod1",
+    "Plants"   = "forestgreen",
+    "Microbes" = "darkviolet",
+    "Bleed-over"   = "red"
+  )) +
+  labs(x = "Library", y = "Relative contribution to genus reads", fill = "Kingdom group", title = "a") +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title   = element_text(size = 22),
+    legend.text  = element_text(size = 22),
+    legend.title = element_text(size = 22,),
+    legend.position = "none",
+    strip.text = element_text(size = 24, face = "bold")
+  )
+
+overview2504
+contribution2504
+
+
+```
+# save 
+```{r, echo=FALSE}
+ggsave("E:/Msc/Thesis/Data/Plots/overview_042025.jpg", overview2504, width = 30, height = 25, units = "cm" ,dpi = 300)
+ggsave("E:/Msc/Thesis/Data/Plots/DNAcontribution_042025.jpg", contribution2504, width = 30, height = 25, units = "cm" ,dpi = 300)
+
+```
+# over view of total sum_genus_count reads per library
+```{r, echo=FALSE}
+df_genus_2504_plot_reads <- df_genus_2504 %>%
+  group_by(library) %>%
+  summarise(
+    total_sum_genus_count = sum(sum_genus_count, na.rm = TRUE),
+    total_genus_count = sum(genus_count_assembly, na.rm = TRUE)
+  ) %>%
+  left_join(df_DNA_contribution_2504 %>% select(library, site), by = "library")
+
+df_genus_2504_plot_reads <- df_genus_2504_plot_reads %>%
+  summarise(
+    
+  )
+
+read_overview2504 <- ggplot(df_genus_2504_plot_reads, aes(x = library, y = total_sum_genus_count)) +
+  geom_col(fill = "grey15", width = 0.6) +
+  facet_grid(. ~ site, scales = "free_x", space = "free_x") +
+  labs(x = "Library", y = "Total unique genus reads", title = "a") +
+  theme(
+    plot.title   = element_text(size = 26, face = "bold", hjust = 0.5),
+    axis.text    = element_text(size = 22, face = "bold"),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.title   = element_text(size = 22),
+    legend.text  = element_text(size = 26),
+    legend.title = element_text(size = 26,),
+    strip.text = element_text(size = 24, face = "bold"),
+    legend.position = c(0.97, 0.95),    # near bottom-right inside plot
+    legend.justification = c("right", "top"),
+    legend.background = element_rect(fill = alpha("white", 0.6), color = NA) # optional translucent box
+    )
+
+read_overview2504
+
+ggsave("E:/Msc/Thesis/Data/Plots/read_count_2504.jpg", read_overview2504, width = 30, height = 25, units = "cm" ,dpi = 300)
+```
