@@ -248,14 +248,14 @@ indicator_list <- read.xlsx("E:/Msc/Thesis/Data/indicator species.xlsx", sheet =
     Indicator_species = str_trim(str_to_lower(Indicator_species))
   )
 
-# Clean your df_indicator
+# Clean df_indicator
 df_indicator <- df_indicator %>%
   mutate(
     taxa_name = str_trim(str_to_lower(taxa_name)),
     genus_name = str_trim(str_to_lower(genus_name))
   )
 
-# === Step 1: Prep species present in DB ===
+# Prep species present in DB
 species_in_DB <- indicator_list %>%
   filter(Species_in_DB == "Yes") %>%
   mutate(
@@ -264,7 +264,7 @@ species_in_DB <- indicator_list %>%
   ) %>%
   select(Indicator_species, Species_in_DB, Genus_in_DB, genus_name, taxa_name)
 
-# === Step 2: Join read counts for present species ===
+# join read counts for present species
 joined_species <- df_indicator %>%
   filter(taxa_name %in% species_in_DB$taxa_name) %>%
   mutate(read_status = case_when(
@@ -274,29 +274,29 @@ joined_species <- df_indicator %>%
   )) %>%
   select(taxa_name, library, read_status)
 
-# === Step 3: Pivot to wide ===
+# Pivot to wide fromat
 wide_taxa_table <- joined_species %>%
   pivot_wider(names_from = library, values_from = read_status)
 
-# === Step 4: Join back to full list ===
+# Join back to full df
 joined_indicator_list <- species_of_interest %>%
   left_join(wide_taxa_table, by = "taxa_name") %>%
   select(-taxa_name, -genus_name) %>%
   right_join(indicator_list, by = "Indicator_species") # ensures all species present
 
-# === Step 5: Get genus-level status and max reads ===
+# get genus level status and max reads
 indicator_status_list <- indicator_list %>%
   mutate(
     genus_name = word(Indicator_species, 1),
     status = if_else(genus_name %in% df_indicator$genus_name, "present", "absent")
   )
 
-# Get max per-genus per-library read count
+# Get max per genus per library read count
 max_genus_reads <- df_indicator %>%
   group_by(genus_name, library) %>%
   summarise(max_genus_count = max(genus_count_assembly, na.rm = TRUE), .groups = "drop")
 
-# === Step 6: Reshape wide to long to join max reads ===
+# Back wide to long
 long_reads <- joined_indicator_list %>%
   pivot_longer(cols = starts_with("Lib.J."),
                names_to = "library",
@@ -313,7 +313,7 @@ long_enriched <- long_reads %>%
     TRUE ~ read_status
   ))
 
-# === Step 7: Pivot back to wide format ===
+# back to wide format
 final_table <- long_enriched %>%
   select(Indicator_species, library, read_status) %>%
   pivot_wider(names_from = library, values_from = read_status) %>%
@@ -336,7 +336,8 @@ final_table <- final_table %>%
   )))
 
 
-# === Step 8: Save to Excel ===
+# save
 write.xlsx(final_table, "E:/Msc/Thesis/Data/indicator_species_list.xlsx")
+
 
 ```
