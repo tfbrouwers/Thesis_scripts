@@ -244,7 +244,7 @@ df_genus_2504_native <- df_genus_2504 %>%
     adjusted_non_bleed = pmax(non_bleed_observed - visible_bleed, 0)
   )
 
-# Now roll up per-library into the four categories you requested:
+# Now roll up per-library into the four categories 
 library_summary <- df_genus_2504_native %>%
   # make a helper lowercase kingdom column for robust matching
   mutate(kg_l = str_to_lower(kingdom_group)) %>%
@@ -254,7 +254,7 @@ library_summary <- df_genus_2504_native %>%
     plant_reads  = sum(adjusted_non_bleed[str_detect(kg_l, "plant")], na.rm = TRUE),
     animal_reads = sum(adjusted_non_bleed[str_detect(kg_l, "animal")], na.rm = TRUE),
     microbe_reads = sum(adjusted_non_bleed[str_detect(kg_l, "micro")], na.rm = TRUE),
-    # bleed-over is summed across kingdom groups (use total_bleed because we doubled)
+   
     bleed_reads = sum(total_bleed, na.rm = TRUE),
     .groups = "drop"
   ) %>%
@@ -284,7 +284,7 @@ df_DNA_contribution_2504 <- library_summary %>%
     ),
     # ensure library is a factor so x-ordering & free_x faceting behave
     library = factor(library, levels = unique(library)),
-    # replace any NA proportions with 0 so stacked bars sum neatly
+    # replace any NA proportions with 0 so stacked bars sum 
     rel_contribution = coalesce(rel_contribution, 0)
   ) %>%
   left_join(site_assign_list, site, by = "library") %>%
@@ -480,3 +480,4 @@ read_overview2504
 
 ggsave("E:/Msc/Thesis/Data/Plots/read_count_2504.jpg", read_overview2504, width = 30, height = 25, units = "cm" ,dpi = 300)
 ```
+
